@@ -6,6 +6,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -329,7 +331,15 @@ private fun ScoresList(
 
 @Composable
 private fun MatchCard(match: ScoreMatch) {
-    Card {
+    val isLive = isLiveMatchStatus(match.status)
+
+    Card(
+        border = if (isLive) {
+            androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.error)
+        } else {
+            null
+        }
+    ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TeamLine(
                 teamName = match.homeTeam,
@@ -440,6 +450,22 @@ private fun CompetitionTabBadge(
 
 private fun formatScorers(scorers: List<GoalScorer>): String {
     return scorers.joinToString(" • ") { "${it.player} ${it.minuteLabel}" }
+}
+
+private fun isLiveMatchStatus(status: String?): Boolean {
+    val value = status?.trim()?.lowercase().orEmpty()
+
+    return value in setOf(
+        "1st_half",
+        "2nd_half",
+        "halftime",
+        "extra_time",
+        "penalties",
+        "live",
+        "in_progress",
+        "break",
+        "paused"
+    )
 }
 
 private fun formatStatus(status: String?, minute: Int?): String {

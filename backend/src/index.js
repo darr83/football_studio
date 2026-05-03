@@ -84,6 +84,38 @@ const filterMatchesForRelation = (matches, relation) => {
 
 const todayIso = () => currentDateIsoInApiTimezone();
 
+const toTimestamp = (value) => {
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const sortMatchesByKickoff = (matches) => {
+  return [...matches].sort((a, b) => toTimestamp(a?.kickoffUtc) - toTimestamp(b?.kickoffUtc));
+};
+
+const getMatchIdentity = (match) => {
+  if (match?.id !== null && match?.id !== undefined) {
+    return `id:${match.id}`;
+  }
+
+  return `fallback:${String(match?.homeTeam ?? "")}|${String(match?.awayTeam ?? "")}|${String(match?.kickoffUtc ?? "")}`;
+};
+
+const mergeDateAndLiveMatches = (dateMatches, liveMatches) => {
+  const merged = new Map();
+
+  for (const match of dateMatches) {
+    merged.set(getMatchIdentity(match), match);
+  }
+
+  // Live payload should override stale snapshots for the same event id.
+  for (const match of liveMatches) {
+    merged.set(getMatchIdentity(match), match);
+  }
+
+  return sortMatchesByKickoff(Array.from(merged.values()));
+};
+
 const getCachedDateMatches = ({ dateIso, competitionKey }) => {
   const dateWindow = getDateWindowState();
   const withinWindow =
@@ -140,35 +172,25 @@ app.get("/api/scores", async (req, res) => {
     const cachedLiveMatches = competitionKey
       ? snapshot.matches.filter((match) => match.competitionKey === competitionKey)
       : snapshot.matches;
+    const cachedDate = getCachedDateMatches({ dateIso: selectedDate, competitionKey });
 
     try {
-      if (cachedLiveMatches.length > 0) {
-        return res.json({
-          source: "cache-live",
-          mode,
-          selectedDate,
-          dateRelation: "today",
-          lastUpdatedUtc: snapshot.lastUpdatedUtc,
-          matches: cachedLiveMatches,
-          error: null
-        });
-      }
-
-      const cachedDate = getCachedDateMatches({ dateIso: selectedDate, competitionKey });
-
       if (cachedDate.hit) {
+        const mergedMatches = mergeDateAndLiveMatches(cachedDate.matches, cachedLiveMatches);
+
         return res.json({
-          source: "cache-date-window",
+          source: "cache-date-window-live-merged",
           mode,
           selectedDate,
           dateRelation: "today",
           lastUpdatedUtc: new Date().toISOString(),
-          matches: cachedDate.matches,
+          matches: mergedMatches,
           error: null
         });
       }
 
-      const matches = await fetchMatchesForDate({ dateIso: selectedDate, competitionKey });
+      const dateMatches = await fetchMatchesForDate({ dateIso: selectedDate, competitionKey });
+      const mergedMatches = mergeDateAndLiveMatches(dateMatches, cachedLiveMatches);
 
       return res.json({
         source: "sports-api-today-live",
@@ -176,7 +198,7 @@ app.get("/api/scores", async (req, res) => {
         selectedDate,
         dateRelation: "today",
         lastUpdatedUtc: new Date().toISOString(),
-        matches,
+        matches: mergedMatches,
         error: null
       });
     } catch (error) {
