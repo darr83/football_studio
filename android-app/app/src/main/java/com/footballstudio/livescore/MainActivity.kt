@@ -7,6 +7,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,11 +49,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,6 +90,12 @@ private data class TimelineTab(
 )
 
 private const val LEAGUE_BADGE_BASE_URL = "https://sports.bzzoiro.com/img/league"
+private val yellowCardRowColor = Color(0xFFFFF59D)
+private val yellowCardTextColor = Color(0xFF5D4037)
+private val redCardRowColor = Color(0xFFFFCDD2)
+private val redCardTextColor = Color(0xFF8B0000)
+private val liveMinuteBgColor = Color(0xFFC8E6C9)
+private val liveMinuteTextColor = Color(0xFF1B5E20)
 
 private val competitionTabs = listOf(
     CompetitionTab(
@@ -579,57 +588,107 @@ private fun MatchDetailsDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         TeamBadge(badgeUrl = homeBadge, size = 44.dp)
-                        Text(text = homeTeam, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = homeTeam,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Start,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
 
-                    Text(
-                        text = "${homeScore ?: "-"} - ${awayScore ?: "-"}",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${homeScore ?: "-"} - ${awayScore ?: "-"}",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         TeamBadge(badgeUrl = awayBadge, size = 44.dp)
-                        Text(text = awayTeam, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = awayTeam,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.End,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
 
-                if (homeScorers.isNotEmpty()) {
-                    Text(
-                        text = "${homeTeam} scorers: ${formatScorers(homeScorers)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TeamScorersList(
+                        title = homeTeam,
+                        scorers = homeScorers,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Start,
+                        horizontalAlignment = Alignment.Start
                     )
-                }
-
-                if (awayScorers.isNotEmpty()) {
-                    Text(
-                        text = "${awayTeam} scorers: ${formatScorers(awayScorers)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    TeamScorersList(
+                        title = awayTeam,
+                        scorers = awayScorers,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
+                        horizontalAlignment = Alignment.End
                     )
                 }
 
                 val minuteText = minute?.let { "$it'" } ?: formatStatusLabel(status, summaryMatch.kickoffUtc)
-                Text(text = "Minute: $minuteText", style = MaterialTheme.typography.bodyMedium)
+                val isLiveMinute = isLiveMatchStatus(status)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Minute:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (isLiveMinute) liveMinuteBgColor else MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = minuteText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isLiveMinute) liveMinuteTextColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Text(
                     text = "Stadium: ${venueName ?: "TBD"}",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.secondary
                 )
                 Text(
                     text = "Referee: ${refereeName ?: "TBD"}",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
 
                 TabRow(selectedTabIndex = selectedTab) {
@@ -698,6 +757,47 @@ private fun MatchDetailsDialog(
 }
 
 @Composable
+private fun TeamScorersList(
+    title: String,
+    scorers: List<GoalScorer>,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign,
+    horizontalAlignment: Alignment.Horizontal
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = horizontalAlignment,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = "$title scorers",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = textAlign,
+            color = MaterialTheme.colorScheme.secondary
+        )
+
+        if (scorers.isEmpty()) {
+            Text(
+                text = "-",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = textAlign,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            scorers.forEach { scorer ->
+                Text(
+                    text = "${scorer.player} ${scorer.minuteLabel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = textAlign,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LineupTab(
     homeTeamName: String,
     awayTeamName: String,
@@ -705,63 +805,175 @@ private fun LineupTab(
     away: TeamLineup,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .fillMaxHeight(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        TeamLineupSection(teamName = homeTeamName, lineup = home)
-        TeamLineupSection(teamName = awayTeamName, lineup = away)
-        Spacer(modifier = Modifier.height(6.dp))
+        TeamLineupSection(
+            teamName = homeTeamName,
+            lineup = home,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+        )
+        TeamLineupSection(
+            teamName = awayTeamName,
+            lineup = away,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+        )
     }
 }
 
 @Composable
 private fun TeamLineupSection(
     teamName: String,
-    lineup: TeamLineup
+    lineup: TeamLineup,
+    modifier: Modifier = Modifier
 ) {
-    Card {
+    Card(
+        modifier = modifier,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier
+                .padding(10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Text(
                 text = teamName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
-            Text("Manager: ${lineup.managerName ?: "TBD"}")
+            Text(
+                text = "Manager: ${lineup.managerName ?: "TBD"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary
+            )
 
             if (!lineup.formation.isNullOrBlank()) {
-                Text("Formation: ${lineup.formation}")
+                Text(
+                    text = "Formation: ${lineup.formation}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
             }
 
-            Text("Starting 11", fontWeight = FontWeight.SemiBold)
-            if (lineup.starting11.isEmpty()) {
-                Text(
-                    text = "No starting lineup available.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                lineup.starting11.forEachIndexed { index, player ->
-                    Text(text = "${index + 1}. ${formatLineupPlayer(player)}")
+            Text(
+                text = "Starting 11",
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                    .padding(6.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (lineup.starting11.isEmpty()) {
+                        Text(
+                            text = "No starting lineup available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        lineup.starting11.forEach { player ->
+                            LineupPlayerRow(player = player)
+                        }
+                    }
                 }
             }
 
-            Text("Substitutions", fontWeight = FontWeight.SemiBold)
-            if (lineup.substitutions.isEmpty()) {
-                Text(
-                    text = "No substitutions listed.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                lineup.substitutions.forEach { substitute ->
-                    Text(text = formatSubstitution(substitute))
+            Text(
+                text = "Substitutions",
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                    .padding(6.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (lineup.substitutions.isEmpty()) {
+                        Text(
+                            text = "No substitutions listed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        lineup.substitutions.forEach { substitute ->
+                            SubstitutionRow(substitute = substitute)
+                        }
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.height(4.dp))
         }
+    }
+}
+
+@Composable
+private fun LineupPlayerRow(player: LineupPlayer) {
+    val rowColor = when {
+        player.redCard -> redCardRowColor
+        player.yellowCard -> yellowCardRowColor
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val textColor = when {
+        player.redCard -> redCardTextColor
+        player.yellowCard -> yellowCardTextColor
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rowColor, RoundedCornerShape(8.dp))
+            .padding(horizontal = 6.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = formatLineupPlayer(player),
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor
+        )
+    }
+}
+
+@Composable
+private fun SubstitutionRow(substitute: SubstitutionItem) {
+    val rowColor = when {
+        substitute.redCard -> redCardRowColor
+        substitute.yellowCard -> yellowCardRowColor
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val textColor = when {
+        substitute.redCard -> redCardTextColor
+        substitute.yellowCard -> yellowCardTextColor
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rowColor, RoundedCornerShape(8.dp))
+            .padding(horizontal = 6.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = formatSubstitution(substitute),
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor
+        )
     }
 }
 
@@ -849,15 +1061,21 @@ private fun formatStat(value: Int?, suffix: String = ""): String {
 
 private fun formatLineupPlayer(player: LineupPlayer): String {
     val positionSuffix = player.position?.let { " ($it)" }.orEmpty()
-    val jerseyPrefix = player.jerseyNumber?.let { "#$it " }.orEmpty()
-    val subOutSuffix = player.subOutMinute?.let { " [off $it']" }.orEmpty()
-    return "$jerseyPrefix${player.name}$positionSuffix$subOutSuffix"
+    val jerseyPrefix = player.jerseyNumber?.takeIf { it.isNotBlank() }?.let { "$it " }.orEmpty()
+    return "$jerseyPrefix${player.name}$positionSuffix"
 }
 
 private fun formatSubstitution(substitute: SubstitutionItem): String {
-    val minute = substitute.minuteIn?.let { "$it'" } ?: "n/a"
-    val replaced = substitute.replacedPlayerName?.let { " for $it" }.orEmpty()
-    return "${substitute.name} (in $minute)$replaced"
+    val events = buildList {
+        substitute.minuteIn?.let { add("ON $it'") }
+        substitute.replacedPlayerName?.takeIf { it.isNotBlank() }?.let { add("OFF $it") }
+    }
+
+    return if (events.isEmpty()) {
+        substitute.name
+    } else {
+        "${substitute.name} (${events.joinToString(" · ")})"
+    }
 }
 
 @Composable

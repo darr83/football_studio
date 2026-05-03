@@ -170,7 +170,9 @@ const normalizePlayer = (player) => {
     name: String(player?.name ?? "Unknown"),
     jerseyNumber: jerseyRaw !== null && jerseyRaw !== undefined ? String(jerseyRaw) : null,
     position: positionRaw ? String(positionRaw) : null,
-    subOutMinute: toNumber(player?.sub_out)
+    subOutMinute: toNumber(player?.sub_out),
+    yellowCard: Boolean(player?.yellow_card),
+    redCard: Boolean(player?.red_card)
   };
 };
 
@@ -181,7 +183,9 @@ const normalizeSubstitution = (substitute, playersById) => {
     name: String(substitute?.name ?? "Unknown"),
     minuteIn: toNumber(substitute?.sub_in),
     replacedPlayerName:
-      replacedPlayerId !== null ? playersById.get(replacedPlayerId) ?? null : null
+      replacedPlayerId !== null ? playersById.get(replacedPlayerId) ?? null : null,
+    yellowCard: Boolean(substitute?.yellow_card),
+    redCard: Boolean(substitute?.red_card)
   };
 };
 

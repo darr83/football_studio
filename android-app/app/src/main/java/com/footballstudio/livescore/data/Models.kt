@@ -94,11 +94,15 @@ data class LineupPlayer(
     val name: String,
     val jerseyNumber: String? = null,
     val position: String? = null,
-    val subOutMinute: Int? = null
+    val subOutMinute: Int? = null,
+    val yellowCard: Boolean = false,
+    val redCard: Boolean = false
 )
 
 data class SubstitutionItem(
     val name: String,
     val minuteIn: Int? = null,
-    val replacedPlayerName: String? = null
+    val replacedPlayerName: String? = null,
+    val yellowCard: Boolean = false,
+    val redCard: Boolean = false
 )
