@@ -27,9 +27,18 @@ By default Android emulator uses `http://10.0.2.2:3000/` to reach the backend.
 
 1. Push repo to GitHub.
 2. In Railway, create a project from the repo.
-3. Set Root Directory to `backend`.
-4. Add env vars from `backend/.env.railway.example`.
-5. Deploy and copy your Railway URL (for example `https://your-service.up.railway.app/`).
+3. Add env vars from `backend/.env.railway.example`.
+4. Deploy and copy your Railway URL (for example `https://your-service.up.railway.app/`).
+
+### If your Railway build previously failed
+
+This repo now includes root-level Railway build files so Railway can build without setting a Root Directory:
+
+- `railway.json`
+- `Dockerfile`
+- `.dockerignore`
+
+Redeploy latest commit and Railway should build from repo root correctly.
 
 ## Wire Android Release To Online Backend
 

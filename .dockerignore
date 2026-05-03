@@ -1,0 +1,16 @@
+.git
+.gitignore
+.idea
+.vscode
+
+android-app
+backend/node_modules
+backend/.env
+
+**/node_modules
+**/build
+**/.gradle
+
+README.md
+open-android-app.bat
+open-android-app.ps1

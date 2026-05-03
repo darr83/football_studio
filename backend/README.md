@@ -38,10 +38,14 @@ The server starts at `http://localhost:3000` by default.
 
 ## Deploy To Railway
 
-This repository is prepared for Railway deployment from the `backend` folder.
+This repository is prepared for Railway deployment in two ways:
+
+1. Preferred: repo root deploy using root-level `railway.json` + `Dockerfile`
+2. Optional: set Railway Root Directory to `backend` and use backend-local files
 
 ### Files already included
 
+- Root-level: `../railway.json`, `../Dockerfile`, `../.dockerignore`
 - `Dockerfile`
 - `.dockerignore`
 - `railway.json`
@@ -51,9 +55,8 @@ This repository is prepared for Railway deployment from the `backend` folder.
 
 1. Push this project to GitHub.
 2. In Railway, create a new project and connect the GitHub repo.
-3. Set the service Root Directory to `backend`.
-4. Add environment variables from `.env.railway.example`.
-5. Deploy.
+3. Add environment variables from `.env.railway.example`.
+4. Deploy.
 
 ### Required env vars in Railway
 
