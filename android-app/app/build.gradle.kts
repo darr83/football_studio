@@ -20,11 +20,11 @@ android {
         }
     }
 
-    val debugBackendUrl =
-        project.findProperty("backend.debugBaseUrl") as String? ?: "http://10.0.2.2:3000/"
     val productionBackendUrl =
         project.findProperty("backend.productionBaseUrl") as String?
-            ?: "https://your-service.up.railway.app/"
+            ?: "https://footballstudio-production.up.railway.app/"
+    val debugBackendUrl =
+        project.findProperty("backend.debugBaseUrl") as String? ?: productionBackendUrl
 
     buildTypes {
         debug {
