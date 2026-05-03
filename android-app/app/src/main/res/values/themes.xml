@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.FootballLive" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>

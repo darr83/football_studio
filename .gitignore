@@ -1,0 +1,15 @@
+# Backend
+backend/node_modules/
+backend/.env
+
+# Android
+android-app/.gradle/
+android-app/local.properties
+android-app/**/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
