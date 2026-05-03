@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { config } from "./config.js";
 import { fetchLiveMatches, fetchMatchesForDateWindow } from "./sportsApi.js";
+import {
+  initRedisCache,
+  loadRedisCacheSnapshot,
+  persistRedisCacheSnapshot
+} from "./redisCache.js";
 
 const updates = new EventEmitter();
 const DATE_WINDOW_DAYS = 7;
@@ -23,6 +28,67 @@ const state = {
 let intervalHandle = null;
 let dateWindowIntervalHandle = null;
 let isRefreshingDateWindow = false;
+
+const toLiveSnapshot = () => ({
+  source: state.source,
+  lastUpdatedUtc: state.lastUpdatedUtc,
+  error: state.error,
+  matches: state.matches
+});
+
+const toDateWindowSnapshot = () => ({
+  ...state.dateWindow,
+  matchesByDate: Object.fromEntries(
+    Object.entries(state.dateWindow.matchesByDate).map(([dateIso, matches]) => [
+      dateIso,
+      [...matches]
+    ])
+  )
+});
+
+const persistStateToRedis = () => {
+  void persistRedisCacheSnapshot({
+    live: toLiveSnapshot(),
+    dateWindow: toDateWindowSnapshot()
+  });
+};
+
+const hydrateStateFromRedis = async () => {
+  await initRedisCache();
+
+  const snapshot = await loadRedisCacheSnapshot();
+
+  const live = snapshot?.live;
+  if (live && Array.isArray(live.matches)) {
+    state.source = typeof live.source === "string" ? live.source : "redis-cache";
+    state.lastUpdatedUtc = typeof live.lastUpdatedUtc === "string" ? live.lastUpdatedUtc : null;
+    state.error = typeof live.error === "string" ? live.error : null;
+    state.matches = live.matches;
+  }
+
+  const dateWindow = snapshot?.dateWindow;
+  if (dateWindow && typeof dateWindow === "object") {
+    const rawMatchesByDate =
+      dateWindow.matchesByDate && typeof dateWindow.matchesByDate === "object"
+        ? dateWindow.matchesByDate
+        : {};
+
+    const matchesByDate = Object.fromEntries(
+      Object.entries(rawMatchesByDate)
+        .filter(([dateIso, matches]) => typeof dateIso === "string" && Array.isArray(matches))
+        .map(([dateIso, matches]) => [dateIso, matches])
+    );
+
+    state.dateWindow = {
+      dateFromIso: typeof dateWindow.dateFromIso === "string" ? dateWindow.dateFromIso : null,
+      dateToIso: typeof dateWindow.dateToIso === "string" ? dateWindow.dateToIso : null,
+      lastUpdatedUtc:
+        typeof dateWindow.lastUpdatedUtc === "string" ? dateWindow.lastUpdatedUtc : null,
+      error: typeof dateWindow.error === "string" ? dateWindow.error : null,
+      matchesByDate
+    };
+  }
+};
 
 export const getState = () => ({ ...state, matches: [...state.matches] });
 
@@ -54,6 +120,8 @@ export const refreshNow = async () => {
     state.error = error instanceof Error ? error.message : "Unknown backend error";
     state.source = "error";
     updates.emit("scores-updated", getState());
+  } finally {
+    persistStateToRedis();
   }
 };
 
@@ -132,6 +200,7 @@ export const refreshDateWindowNow = async () => {
     };
   } finally {
     isRefreshingDateWindow = false;
+    persistStateToRedis();
   }
 };
 
@@ -140,6 +209,7 @@ export const startScheduler = async () => {
     return;
   }
 
+  await hydrateStateFromRedis();
   await refreshNow();
   void refreshDateWindowNow();
 

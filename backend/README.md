@@ -35,6 +35,19 @@ The server starts at `http://localhost:3000` by default.
 
 - Sync interval is controlled by `SYNC_INTERVAL_MS` (default `20000`).
 - Date tabs are preloaded in backend memory for the range `today - 7` to `today + 7` for fast switching.
+- Optional Redis persistence keeps warm cache data across backend restarts.
+
+## Optional Redis Cache Persistence
+
+If `REDIS_URL` is set, backend cache snapshots are saved to Redis and restored on startup.
+
+- `REDIS_URL=redis://...`
+- `REDIS_KEY_PREFIX=footballstudio` (default)
+
+This persists:
+
+- Live score cache (`/api/scores?mode=live`)
+- Preloaded date-window cache (`today - 7` to `today + 7`)
 
 ## Deploy To Railway
 
@@ -65,6 +78,11 @@ This repository is prepared for Railway deployment in two ways:
 - `SPORTS_API_KEY=...`
 - `SPORTS_API_TIMEZONE=Europe/London`
 - `SYNC_INTERVAL_MS=20000`
+
+### Optional env vars in Railway
+
+- `REDIS_URL=redis://...`
+- `REDIS_KEY_PREFIX=footballstudio`
 
 ### Verify after deploy
 
