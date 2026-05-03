@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
 import { getDateWindowState, getState, onUpdate, startScheduler } from "./cacheStore.js";
-import { fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
+import { fetchLiveTickerEvents, fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
 
 const app = express();
 
@@ -148,6 +148,52 @@ const getCachedDateMatches = ({ dateIso, competitionKey }) => {
     hit: true,
     matches
   };
+};
+
+const toTickerStatusEntries = (matches) => {
+  return matches
+    .map((match) => {
+      const status = String(match?.status ?? "").toLowerCase();
+      const label =
+        status === "halftime"
+          ? "HALF TIME"
+          : status === "finished" ||
+              status === "fulltime" ||
+              status === "ft" ||
+              status === "after_extra_time" ||
+              status === "aet" ||
+              status === "penalties"
+            ? "FULL TIME"
+            : null;
+
+      if (!label) {
+        return null;
+      }
+
+      const homeScore = match?.homeScore;
+      const awayScore = match?.awayScore;
+      const score = `${homeScore ?? "-"} - ${awayScore ?? "-"}`;
+
+      return {
+        eventKey: [
+          "status",
+          String(match?.id ?? `${String(match?.homeTeam ?? "")}:${String(match?.awayTeam ?? "")}`),
+          label,
+          score
+        ].join(":"),
+        eventType: label === "HALF TIME" ? "half-time" : "full-time",
+        teamSide: null,
+        competitionName: String(match?.leagueName ?? "Unknown League"),
+        homeTeam: String(match?.homeTeam ?? "Home"),
+        awayTeam: String(match?.awayTeam ?? "Away"),
+        homeScore,
+        awayScore,
+        minuteLabel: match?.minute !== null && match?.minute !== undefined ? `${match.minute}'` : null,
+        playerName: null,
+        message: `${String(match?.leagueName ?? "Unknown League")} - ${String(match?.homeTeam ?? "Home")} ${score} ${String(match?.awayTeam ?? "Away")} - ${label}`
+      };
+    })
+    .filter((entry) => entry !== null);
 };
 
 app.get("/health", (_req, res) => {
@@ -305,6 +351,37 @@ app.get("/api/matches/:matchId/details", async (req, res) => {
       source: "error",
       lastUpdatedUtc: new Date().toISOString(),
       match: null,
+      error: error instanceof Error ? error.message : "Unknown backend error"
+    });
+  }
+});
+
+app.get("/api/live-feed", async (req, res) => {
+  const competitionKey = req.query.competitionKey
+    ? String(req.query.competitionKey)
+    : null;
+
+  try {
+    const liveEntries = await fetchLiveTickerEvents({ competitionKey });
+    const cachedToday = getCachedDateMatches({ dateIso: todayIso(), competitionKey });
+    const statusEntries = cachedToday.hit ? toTickerStatusEntries(cachedToday.matches) : [];
+    const merged = new Map();
+
+    for (const event of [...liveEntries, ...statusEntries]) {
+      merged.set(event.eventKey, event);
+    }
+
+    return res.json({
+      source: "sports-api-live-feed",
+      lastUpdatedUtc: new Date().toISOString(),
+      events: Array.from(merged.values()),
+      error: null
+    });
+  } catch (error) {
+    return res.status(500).json({
+      source: "error",
+      lastUpdatedUtc: new Date().toISOString(),
+      events: [],
       error: error instanceof Error ? error.message : "Unknown backend error"
     });
   }

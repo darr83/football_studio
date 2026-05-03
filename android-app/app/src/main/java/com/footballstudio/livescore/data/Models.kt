@@ -106,3 +106,24 @@ data class SubstitutionItem(
     val yellowCard: Boolean = false,
     val redCard: Boolean = false
 )
+
+data class LiveTickerResponse(
+    val source: String,
+    @Json(name = "lastUpdatedUtc") val lastUpdatedUtc: String?,
+    val events: List<LiveTickerEvent> = emptyList(),
+    val error: String?
+)
+
+data class LiveTickerEvent(
+    val eventKey: String,
+    val eventType: String,
+    val teamSide: String? = null,
+    val competitionName: String,
+    val homeTeam: String,
+    val awayTeam: String,
+    val homeScore: Int? = null,
+    val awayScore: Int? = null,
+    val minuteLabel: String? = null,
+    val playerName: String? = null,
+    val message: String
+)

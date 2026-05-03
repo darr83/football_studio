@@ -341,6 +341,163 @@ const normalizeMatchDetails = (event) => {
   };
 };
 
+const toTickerMinuteSort = (incident) => {
+  const minute = toNumber(incident?.minute) ?? 0;
+  const addedTime = toNumber(incident?.added_time);
+  const normalizedAdded = addedTime !== null && addedTime > 0 && addedTime < 30 ? addedTime : 0;
+  return minute * 100 + normalizedAdded;
+};
+
+const toTickerMessage = ({
+  leagueName,
+  homeTeam,
+  awayTeam,
+  homeScore,
+  awayScore,
+  eventLabel,
+  playerName = null
+}) => {
+  const score = `${homeScore ?? "-"} - ${awayScore ?? "-"}`;
+  const suffix = playerName ? ` ${playerName}` : "";
+  return `${leagueName} - ${homeTeam} ${score} ${awayTeam} - ${eventLabel}${suffix}`;
+};
+
+const normalizeTickerIncident = (event, incident) => {
+  const incidentType = String(incident?.type ?? "").toLowerCase();
+  const leagueName = String(event?.league?.name ?? event?.group_name ?? "Unknown League");
+  const homeTeam = normalizeTeamName(event, "home");
+  const awayTeam = normalizeTeamName(event, "away");
+  const homeScore = event?.home_score ?? incident?.home_score ?? null;
+  const awayScore = event?.away_score ?? incident?.away_score ?? null;
+  const playerName = incident?.player ? String(incident.player) : null;
+  const minuteLabel = toMinuteLabel(incident);
+  const teamSide =
+    incident?.is_home === true ? "home" : incident?.is_home === false ? "away" : null;
+
+  if (incidentType === "goal") {
+    const goalType = String(incident?.goal_type ?? "regular").toLowerCase();
+    const eventLabel = goalType === "penalty" ? "PENALTY GOAL" : "GOAL";
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentType,
+        minuteLabel,
+        String(playerName ?? ""),
+        goalType,
+        String(homeScore ?? ""),
+        String(awayScore ?? "")
+      ].join(":"),
+      eventType: goalType === "penalty" ? "penalty" : "goal",
+      teamSide,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel,
+      playerName,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel,
+        playerName
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
+  if (incidentType === "card") {
+    const cardType = String(incident?.card_type ?? "yellow").toLowerCase();
+    const eventLabel = cardType === "red" ? "RED CARD" : "YELLOW CARD";
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentType,
+        minuteLabel,
+        String(playerName ?? ""),
+        cardType
+      ].join(":"),
+      eventType: cardType === "red" ? "red-card" : "yellow-card",
+      teamSide,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel,
+      playerName,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel,
+        playerName
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
+  if (incidentType === "period") {
+    const periodText = String(incident?.text ?? "").toLowerCase();
+    const isHalfTime = periodText.includes("ht") || periodText.includes("half time");
+    const isFullTime = periodText.includes("ft") || periodText.includes("full time");
+
+    if (!isHalfTime && !isFullTime) {
+      return null;
+    }
+
+    const eventLabel = isHalfTime ? "HALF TIME" : "FULL TIME";
+    const statusMinuteLabel = isHalfTime ? "HT" : "FT";
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentType,
+        statusMinuteLabel,
+        eventLabel
+      ].join(":"),
+      eventType: isHalfTime ? "half-time" : "full-time",
+      teamSide: null,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel: statusMinuteLabel,
+      playerName: null,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
+  return null;
+};
+
+const normalizeLiveTickerEvents = (event) => {
+  const incidents = Array.isArray(event?.incidents) ? event.incidents : [];
+
+  return incidents
+    .map((incident) => normalizeTickerIncident(event, incident))
+    .filter((incident) => incident !== null);
+};
+
 const sortByKickoff = (a, b) => {
   const aTime = a.kickoffUtc ? Date.parse(a.kickoffUtc) : 0;
   const bTime = b.kickoffUtc ? Date.parse(b.kickoffUtc) : 0;
@@ -462,6 +619,20 @@ export const fetchMatchDetails = async ({ matchId }) => {
   });
 
   return normalizeMatchDetails(event);
+};
+
+export const fetchLiveTickerEvents = async ({ competitionKey = null } = {}) => {
+  if (!config.apiKey) {
+    throw new Error("SPORTS_API_KEY is missing. Add it to backend/.env");
+  }
+
+  const liveMatches = await fetchLiveTargetLeagues();
+  const filtered = withCompetitionFilter(liveMatches, competitionKey);
+
+  return filtered
+    .flatMap(normalizeLiveTickerEvents)
+    .sort((a, b) => b.sortValue - a.sortValue)
+    .map(({ sortValue, ...event }) => event);
 };
 
 export const fetchRelevantMatches = async () => {

@@ -2,10 +2,12 @@ package com.footballstudio.livescore
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.footballstudio.livescore.data.LiveTickerEvent
 import com.footballstudio.livescore.data.MatchDetails
 import com.footballstudio.livescore.data.ScoreMatch
 import com.footballstudio.livescore.data.ScoresResponse
 import com.footballstudio.livescore.data.ScoresRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +28,11 @@ data class LiveScoresUiState(
     val selectedMatch: ScoreMatch? = null,
     val matchDetails: MatchDetails? = null,
     val isDetailsLoading: Boolean = false,
-    val matchDetailsError: String? = null
+    val matchDetailsError: String? = null,
+    val isLiveTickerOpen: Boolean = false,
+    val isLiveTickerLoading: Boolean = false,
+    val liveTickerEvents: List<LiveTickerEvent> = emptyList(),
+    val liveTickerError: String? = null
 )
 
 class LiveScoreViewModel(
@@ -37,6 +43,8 @@ class LiveScoreViewModel(
     private var currentDate: String? = null
     private var currentCompetitionKey: String = "premier-league"
     private val responseCache = mutableMapOf<String, ScoresResponse>()
+    private val seenTickerEventKeys = LinkedHashSet<String>()
+    private var liveTickerJob: Job? = null
 
     private val _uiState = MutableStateFlow(
         LiveScoresUiState(
@@ -122,6 +130,38 @@ class LiveScoreViewModel(
         }
     }
 
+    fun openLiveTicker() {
+        seenTickerEventKeys.clear()
+
+        _uiState.update {
+            it.copy(
+                isLiveTickerOpen = true,
+                isLiveTickerLoading = true,
+                liveTickerEvents = emptyList(),
+                liveTickerError = null
+            )
+        }
+
+        viewModelScope.launch {
+            loadLiveTicker(showLoading = true)
+        }
+
+        startLiveTickerPolling()
+    }
+
+    fun closeLiveTicker() {
+        liveTickerJob?.cancel()
+        liveTickerJob = null
+
+        _uiState.update {
+            it.copy(
+                isLiveTickerOpen = false,
+                isLiveTickerLoading = false,
+                liveTickerError = null
+            )
+        }
+    }
+
     fun setFilters(
         competitionKey: String,
         mode: String,
@@ -154,6 +194,22 @@ class LiveScoreViewModel(
 
         viewModelScope.launch {
             loadScores(showLoading = cached == null)
+        }
+
+        if (_uiState.value.isLiveTickerOpen) {
+            seenTickerEventKeys.clear()
+
+            _uiState.update {
+                it.copy(
+                    liveTickerEvents = emptyList(),
+                    liveTickerError = null,
+                    isLiveTickerLoading = true
+                )
+            }
+
+            viewModelScope.launch {
+                loadLiveTicker(showLoading = true)
+            }
         }
     }
 
@@ -223,6 +279,71 @@ class LiveScoreViewModel(
             }
     }
 
+    private fun startLiveTickerPolling() {
+        if (liveTickerJob?.isActive == true) {
+            return
+        }
+
+        liveTickerJob = viewModelScope.launch {
+            while (isActive) {
+                if (!_uiState.value.isLiveTickerOpen) {
+                    break
+                }
+
+                loadLiveTicker(showLoading = false)
+                delay(TICKER_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun loadLiveTicker(showLoading: Boolean) {
+        if (!_uiState.value.isLiveTickerOpen) {
+            return
+        }
+
+        if (showLoading) {
+            _uiState.update { it.copy(isLiveTickerLoading = true) }
+        }
+
+        runCatching {
+            repository.fetchLiveTicker(currentCompetitionKey)
+        }
+            .onSuccess { response ->
+                if (!_uiState.value.isLiveTickerOpen) {
+                    return@onSuccess
+                }
+
+                val newEvents = response.events.filter { seenTickerEventKeys.add(it.eventKey) }
+
+                _uiState.update { current ->
+                    val merged = (newEvents + current.liveTickerEvents)
+                        .distinctBy { it.eventKey }
+                        .take(MAX_TICKER_EVENTS)
+
+                    seenTickerEventKeys.clear()
+                    seenTickerEventKeys.addAll(merged.map { it.eventKey })
+
+                    current.copy(
+                        isLiveTickerLoading = false,
+                        liveTickerEvents = merged,
+                        liveTickerError = response.error
+                    )
+                }
+            }
+            .onFailure { throwable ->
+                if (!_uiState.value.isLiveTickerOpen) {
+                    return@onFailure
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isLiveTickerLoading = false,
+                        liveTickerError = throwable.message ?: "Could not load live ticker"
+                    )
+                }
+            }
+    }
+
     private fun applyResponse(
         response: ScoresResponse,
         mode: String,
@@ -274,5 +395,7 @@ class LiveScoreViewModel(
 
     private companion object {
         const val POLL_INTERVAL_MS = 20_000L
+        const val TICKER_POLL_INTERVAL_MS = 12_000L
+        const val MAX_TICKER_EVENTS = 120
     }
 }

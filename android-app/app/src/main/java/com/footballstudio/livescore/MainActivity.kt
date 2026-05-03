@@ -63,6 +63,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.footballstudio.livescore.data.GoalScorer
+import com.footballstudio.livescore.data.LiveTickerEvent
 import com.footballstudio.livescore.data.LineupPlayer
 import com.footballstudio.livescore.data.MatchDetails
 import com.footballstudio.livescore.data.MatchStats
@@ -187,7 +188,9 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onFiltersChanged = viewModel::setFilters,
                         onMatchSelected = viewModel::selectMatchForDetails,
-                        onDismissMatchDetails = viewModel::dismissMatchDetails
+                        onDismissMatchDetails = viewModel::dismissMatchDetails,
+                        onOpenLiveTicker = viewModel::openLiveTicker,
+                        onCloseLiveTicker = viewModel::closeLiveTicker
                     )
                 }
             }
@@ -201,7 +204,9 @@ private fun LiveScoresScreen(
     state: LiveScoresUiState,
     onFiltersChanged: (competitionKey: String, mode: String, date: String?) -> Unit,
     onMatchSelected: (ScoreMatch) -> Unit,
-    onDismissMatchDetails: () -> Unit
+    onDismissMatchDetails: () -> Unit,
+    onOpenLiveTicker: () -> Unit,
+    onCloseLiveTicker: () -> Unit
 ) {
     val timelineTabs = buildTimelineTabs()
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
@@ -224,12 +229,34 @@ private fun LiveScoresScreen(
             Column {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = "Football STUDIO",
-                            fontFamily = FontFamily.SansSerif,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.1.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "Football STUDIO",
+                                fontFamily = FontFamily.SansSerif,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 1.1.sp
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        color = if (state.isLiveTickerOpen) redCardRowColor else MaterialTheme.colorScheme.primary,
+                                        shape = RoundedCornerShape(999.dp)
+                                    )
+                                    .clickable(onClick = onOpenLiveTicker)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "LIVE",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (state.isLiveTickerOpen) redCardTextColor else MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
                     }
                 )
 
@@ -283,6 +310,15 @@ private fun LiveScoresScreen(
                 isLoading = state.isDetailsLoading,
                 error = state.matchDetailsError,
                 onDismiss = onDismissMatchDetails
+            )
+        }
+
+        if (state.isLiveTickerOpen) {
+            LiveTickerDialog(
+                events = state.liveTickerEvents,
+                isLoading = state.isLiveTickerLoading,
+                error = state.liveTickerError,
+                onDismiss = onCloseLiveTicker
             )
         }
     }
@@ -637,14 +673,12 @@ private fun MatchDetailsDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     TeamScorersList(
-                        title = homeTeam,
                         scorers = homeScorers,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Start,
                         horizontalAlignment = Alignment.Start
                     )
                     TeamScorersList(
-                        title = awayTeam,
                         scorers = awayScorers,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.End,
@@ -757,8 +791,144 @@ private fun MatchDetailsDialog(
 }
 
 @Composable
+private fun LiveTickerDialog(
+    events: List<LiveTickerEvent>,
+    isLoading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LIVE Ticker",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Close",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable(onClick = onDismiss)
+                    )
+                }
+
+                Text(
+                    text = "Goals, cards, penalties, half-time and full-time updates.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                when {
+                    isLoading && events.isEmpty() -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    !error.isNullOrBlank() && events.isEmpty() -> {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(events, key = { it.eventKey }) { event ->
+                                LiveTickerRow(event = event)
+                            }
+                        }
+
+                        if (!error.isNullOrBlank()) {
+                            Text(
+                                text = error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveTickerRow(event: LiveTickerEvent) {
+    val rowColor = when (event.teamSide) {
+        "home" -> MaterialTheme.colorScheme.primaryContainer
+        "away" -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val rowTextColor = when (event.teamSide) {
+        "home" -> MaterialTheme.colorScheme.onPrimaryContainer
+        "away" -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = rowColor)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (!event.minuteLabel.isNullOrBlank()) {
+                Text(
+                    text = event.minuteLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = rowTextColor
+                )
+            }
+
+            Text(
+                text = event.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = rowTextColor,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun TeamScorersList(
-    title: String,
     scorers: List<GoalScorer>,
     modifier: Modifier = Modifier,
     textAlign: TextAlign,
@@ -769,14 +939,6 @@ private fun TeamScorersList(
         horizontalAlignment = horizontalAlignment,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(
-            text = "$title scorers",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = textAlign,
-            color = MaterialTheme.colorScheme.secondary
-        )
-
         if (scorers.isEmpty()) {
             Text(
                 text = "-",
@@ -892,7 +1054,7 @@ private fun TeamLineupSection(
             }
 
             Text(
-                text = "Substitutions",
+                text = "Substitutes",
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
@@ -906,13 +1068,13 @@ private fun TeamLineupSection(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (lineup.substitutions.isEmpty()) {
                         Text(
-                            text = "No substitutions listed.",
+                            text = "No substitutes listed.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
                         lineup.substitutions.forEach { substitute ->
-                            SubstitutionRow(substitute = substitute)
+                            SubstitutionPlayerRow(substitute = substitute)
                         }
                     }
                 }
@@ -951,7 +1113,7 @@ private fun LineupPlayerRow(player: LineupPlayer) {
 }
 
 @Composable
-private fun SubstitutionRow(substitute: SubstitutionItem) {
+private fun SubstitutionPlayerRow(substitute: SubstitutionItem) {
     val rowColor = when {
         substitute.redCard -> redCardRowColor
         substitute.yellowCard -> yellowCardRowColor
@@ -970,7 +1132,7 @@ private fun SubstitutionRow(substitute: SubstitutionItem) {
             .padding(horizontal = 6.dp, vertical = 5.dp)
     ) {
         Text(
-            text = formatSubstitution(substitute),
+            text = substitute.name,
             style = MaterialTheme.typography.bodySmall,
             color = textColor
         )
@@ -1063,19 +1225,6 @@ private fun formatLineupPlayer(player: LineupPlayer): String {
     val positionSuffix = player.position?.let { " ($it)" }.orEmpty()
     val jerseyPrefix = player.jerseyNumber?.takeIf { it.isNotBlank() }?.let { "$it " }.orEmpty()
     return "$jerseyPrefix${player.name}$positionSuffix"
-}
-
-private fun formatSubstitution(substitute: SubstitutionItem): String {
-    val events = buildList {
-        substitute.minuteIn?.let { add("ON $it'") }
-        substitute.replacedPlayerName?.takeIf { it.isNotBlank() }?.let { add("OFF $it") }
-    }
-
-    return if (events.isEmpty()) {
-        substitute.name
-    } else {
-        "${substitute.name} (${events.joinToString(" · ")})"
-    }
 }
 
 @Composable

@@ -24,6 +24,11 @@ interface ScoresApi {
     suspend fun getMatchDetails(
         @Path("matchId") matchId: Int
     ): MatchDetailsResponse
+
+    @GET("api/live-feed")
+    suspend fun getLiveTicker(
+        @Query("competitionKey") competitionKey: String? = null
+    ): LiveTickerResponse
 }
 
 object ScoresApiFactory {

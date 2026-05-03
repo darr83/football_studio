@@ -89,6 +89,40 @@ class ScoresRepository {
         )
     }
 
+    suspend fun fetchLiveTicker(competitionKey: String?): LiveTickerResponse {
+        val candidates = buildCandidateUrls(BuildConfig.BACKEND_BASE_URL)
+        var lastError: Throwable? = null
+        val errorsByUrl = mutableListOf<String>()
+
+        for (url in candidates) {
+            runCatching {
+                ScoresApiFactory.create(url).getLiveTicker(competitionKey)
+            }
+                .onSuccess { return it }
+                .onFailure {
+                    lastError = it
+                    errorsByUrl += "$url -> ${describeError(it)}"
+                }
+        }
+
+        val usingOnlyRemoteUrl = candidates.size == 1 && !isLikelyLocalUrl(candidates.first())
+        val details = errorsByUrl.joinToString(" | ")
+
+        if (usingOnlyRemoteUrl) {
+            throw IllegalStateException(
+                "Live ticker request failed for ${candidates.first()}. $details",
+                lastError
+            )
+        }
+
+        throw IllegalStateException(
+            "Could not connect to backend for live ticker. Checked: ${candidates.joinToString()}. " +
+                "If using a phone on local backend, run: adb reverse tcp:3000 tcp:3000. " +
+                details,
+            lastError
+        )
+    }
+
     private fun buildCandidateUrls(primary: String): List<String> {
         val primaryNormalized = ensureTrailingSlash(primary.trim())
 
