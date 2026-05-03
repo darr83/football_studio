@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
 import { getDateWindowState, getState, onUpdate, startScheduler } from "./cacheStore.js";
-import { fetchMatchesForDate } from "./sportsApi.js";
+import { fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
 
 const app = express();
 
@@ -277,6 +277,37 @@ app.get("/api/scores", async (req, res) => {
     dateRelation: "today",
     matches
   });
+});
+
+app.get("/api/matches/:matchId/details", async (req, res) => {
+  const matchId = Number(req.params.matchId);
+
+  if (!Number.isFinite(matchId)) {
+    return res.status(400).json({
+      source: "error",
+      lastUpdatedUtc: new Date().toISOString(),
+      match: null,
+      error: "Invalid match id"
+    });
+  }
+
+  try {
+    const match = await fetchMatchDetails({ matchId });
+
+    return res.json({
+      source: "sports-api-detail",
+      lastUpdatedUtc: new Date().toISOString(),
+      match,
+      error: null
+    });
+  } catch (error) {
+    return res.status(500).json({
+      source: "error",
+      lastUpdatedUtc: new Date().toISOString(),
+      match: null,
+      error: error instanceof Error ? error.message : "Unknown backend error"
+    });
+  }
 });
 
 app.get("/api/scores/stream", (req, res) => {

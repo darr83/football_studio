@@ -8,6 +8,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
@@ -18,6 +19,11 @@ interface ScoresApi {
         @Query("date") date: String? = null,
         @Query("competitionKey") competitionKey: String? = null
     ): ScoresResponse
+
+    @GET("api/matches/{matchId}/details")
+    suspend fun getMatchDetails(
+        @Path("matchId") matchId: Int
+    ): MatchDetailsResponse
 }
 
 object ScoresApiFactory {

@@ -2,6 +2,7 @@ package com.footballstudio.livescore
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.footballstudio.livescore.data.MatchDetails
 import com.footballstudio.livescore.data.ScoreMatch
 import com.footballstudio.livescore.data.ScoresResponse
 import com.footballstudio.livescore.data.ScoresRepository
@@ -21,7 +22,11 @@ data class LiveScoresUiState(
     val dateRelation: String = "today",
     val competitionKey: String = "premier-league",
     val lastUpdatedUtc: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val selectedMatch: ScoreMatch? = null,
+    val matchDetails: MatchDetails? = null,
+    val isDetailsLoading: Boolean = false,
+    val matchDetailsError: String? = null
 )
 
 class LiveScoreViewModel(
@@ -49,6 +54,71 @@ class LiveScoreViewModel(
     fun manualRefresh() {
         viewModelScope.launch {
             loadScores(showLoading = false)
+        }
+    }
+
+    fun selectMatchForDetails(match: ScoreMatch) {
+        if (!isEligibleForDetails(match)) {
+            return
+        }
+
+        val matchId = match.id
+
+        _uiState.update {
+            it.copy(
+                selectedMatch = match,
+                matchDetails = null,
+                isDetailsLoading = matchId != null,
+                matchDetailsError = if (matchId == null) "Details are unavailable for this match." else null
+            )
+        }
+
+        if (matchId == null) {
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching { repository.fetchMatchDetails(matchId) }
+                .onSuccess { details ->
+                    val stillSelected = _uiState.value.selectedMatch?.id == matchId
+
+                    if (!stillSelected) {
+                        return@onSuccess
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            matchDetails = details,
+                            isDetailsLoading = false,
+                            matchDetailsError = null
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    val stillSelected = _uiState.value.selectedMatch?.id == matchId
+
+                    if (!stillSelected) {
+                        return@onFailure
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            isDetailsLoading = false,
+                            matchDetailsError = throwable.message ?: "Could not load match details"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissMatchDetails() {
+        _uiState.update {
+            it.copy(
+                selectedMatch = null,
+                matchDetails = null,
+                isDetailsLoading = false,
+                matchDetailsError = null
+            )
         }
     }
 
@@ -179,6 +249,27 @@ class LiveScoreViewModel(
         date: String?
     ): String {
         return "$competitionKey|$mode|${date.orEmpty()}"
+    }
+
+    private fun isEligibleForDetails(match: ScoreMatch): Boolean {
+        val value = match.status?.trim()?.lowercase().orEmpty()
+
+        return value in setOf(
+            "1st_half",
+            "2nd_half",
+            "halftime",
+            "extra_time",
+            "penalties",
+            "live",
+            "in_progress",
+            "break",
+            "paused",
+            "finished",
+            "fulltime",
+            "ft",
+            "after_extra_time",
+            "aet"
+        )
     }
 
     private companion object {

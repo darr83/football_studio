@@ -47,6 +47,48 @@ class ScoresRepository {
         )
     }
 
+    suspend fun fetchMatchDetails(matchId: Int): MatchDetails {
+        val candidates = buildCandidateUrls(BuildConfig.BACKEND_BASE_URL)
+        var lastError: Throwable? = null
+        val errorsByUrl = mutableListOf<String>()
+
+        for (url in candidates) {
+            runCatching {
+                ScoresApiFactory.create(url).getMatchDetails(matchId)
+            }
+                .onSuccess { response ->
+                    val match = response.match
+
+                    if (match != null) {
+                        return match
+                    }
+
+                    throw IllegalStateException(response.error ?: "Match details unavailable")
+                }
+                .onFailure {
+                    lastError = it
+                    errorsByUrl += "$url -> ${describeError(it)}"
+                }
+        }
+
+        val usingOnlyRemoteUrl = candidates.size == 1 && !isLikelyLocalUrl(candidates.first())
+        val details = errorsByUrl.joinToString(" | ")
+
+        if (usingOnlyRemoteUrl) {
+            throw IllegalStateException(
+                "Match details request failed for ${candidates.first()}. $details",
+                lastError
+            )
+        }
+
+        throw IllegalStateException(
+            "Could not connect to backend for match details. Checked: ${candidates.joinToString()}. " +
+                "If using a phone on local backend, run: adb reverse tcp:3000 tcp:3000. " +
+                details,
+            lastError
+        )
+    }
+
     private fun buildCandidateUrls(primary: String): List<String> {
         val primaryNormalized = ensureTrailingSlash(primary.trim())
 

@@ -132,6 +132,102 @@ const toMinuteSort = (incident) => {
   return minute * 100 + addedTime;
 };
 
+const toCoachName = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  if (typeof value === "object") {
+    const preferred = String(value.name ?? value.short_name ?? "").trim();
+    return preferred ? preferred : null;
+  }
+
+  return null;
+};
+
+const pickFirstNumber = (obj, keys) => {
+  for (const key of keys) {
+    const parsed = toNumber(obj?.[key]);
+
+    if (parsed !== null) {
+      return Math.round(parsed);
+    }
+  }
+
+  return null;
+};
+
+const normalizePlayer = (player) => {
+  const jerseyRaw = player?.jersey_number;
+  const positionRaw = player?.position ?? player?.specific_position;
+
+  return {
+    name: String(player?.name ?? "Unknown"),
+    jerseyNumber: jerseyRaw !== null && jerseyRaw !== undefined ? String(jerseyRaw) : null,
+    position: positionRaw ? String(positionRaw) : null,
+    subOutMinute: toNumber(player?.sub_out)
+  };
+};
+
+const normalizeSubstitution = (substitute, playersById) => {
+  const replacedPlayerId = toNumber(substitute?.replaces_player_id);
+
+  return {
+    name: String(substitute?.name ?? "Unknown"),
+    minuteIn: toNumber(substitute?.sub_in),
+    replacedPlayerName:
+      replacedPlayerId !== null ? playersById.get(replacedPlayerId) ?? null : null
+  };
+};
+
+const normalizeTeamLineup = ({ lineup, fallbackCoach }) => {
+  const playersRaw = Array.isArray(lineup?.players) ? lineup.players : [];
+  const substitutesRaw = Array.isArray(lineup?.substitutes) ? lineup.substitutes : [];
+  const playersById = new Map(
+    playersRaw
+      .map((player) => [toNumber(player?.player_id), String(player?.name ?? "Unknown")])
+      .filter(([playerId]) => playerId !== null)
+  );
+
+  const startingRaw = playersRaw.filter((player) => toNumber(player?.sub_in) === null);
+  const starting11 = (startingRaw.length > 0 ? startingRaw : playersRaw).map(normalizePlayer);
+  const substitutions = substitutesRaw.map((substitute) =>
+    normalizeSubstitution(substitute, playersById)
+  );
+
+  return {
+    managerName:
+      toCoachName(lineup?.coach) ??
+      toCoachName(lineup?.manager) ??
+      toCoachName(fallbackCoach),
+    formation: lineup?.formation ? String(lineup.formation) : null,
+    starting11,
+    substitutions
+  };
+};
+
+const normalizeStats = (homeStats, awayStats) => {
+  return {
+    possessionHome: pickFirstNumber(homeStats, ["ball_possession", "possession"]),
+    possessionAway: pickFirstNumber(awayStats, ["ball_possession", "possession"]),
+    shotsHome: pickFirstNumber(homeStats, ["total_shots", "shots"]),
+    shotsAway: pickFirstNumber(awayStats, ["total_shots", "shots"]),
+    shotsOnTargetHome: pickFirstNumber(homeStats, ["shots_on_target", "shots_on_goal"]),
+    shotsOnTargetAway: pickFirstNumber(awayStats, ["shots_on_target", "shots_on_goal"]),
+    cornersHome: pickFirstNumber(homeStats, ["corner_kicks", "corners"]),
+    cornersAway: pickFirstNumber(awayStats, ["corner_kicks", "corners"]),
+    yellowCardsHome: pickFirstNumber(homeStats, ["yellow_cards"]),
+    yellowCardsAway: pickFirstNumber(awayStats, ["yellow_cards"]),
+    redCardsHome: pickFirstNumber(homeStats, ["red_cards"]),
+    redCardsAway: pickFirstNumber(awayStats, ["red_cards"])
+  };
+};
+
 const extractGoalScorers = (event) => {
   const incidents = Array.isArray(event?.incidents) ? event.incidents : [];
   const home = [];
@@ -201,6 +297,43 @@ const normalizeMatch = (event) => {
     awayScore: event?.away_score ?? null,
     homeScorers,
     awayScorers
+  };
+};
+
+const normalizeMatchDetails = (event) => {
+  const { homeScorers, awayScorers } = extractGoalScorers(event);
+  const homeTeamId = normalizeTeamId(event, "home");
+  const awayTeamId = normalizeTeamId(event, "away");
+  const venueName = event?.venue?.name ?? event?.venue_name ?? null;
+  const lineups = event?.lineups ?? {};
+  const homeLiveStats = event?.live_stats?.home ?? event?.sr_stats?.home ?? {};
+  const awayLiveStats = event?.live_stats?.away ?? event?.sr_stats?.away ?? {};
+
+  return {
+    id: event?.id,
+    status: event?.status ?? "UNKNOWN",
+    minute: event?.current_minute ?? null,
+    refereeName: toCoachName(event?.referee),
+    venueName,
+    homeTeam: normalizeTeamName(event, "home"),
+    awayTeam: normalizeTeamName(event, "away"),
+    homeTeamBadgeUrl: toTeamBadgeUrl(homeTeamId),
+    awayTeamBadgeUrl: toTeamBadgeUrl(awayTeamId),
+    homeScore: event?.home_score ?? null,
+    awayScore: event?.away_score ?? null,
+    homeScorers,
+    awayScorers,
+    stats: normalizeStats(homeLiveStats, awayLiveStats),
+    lineups: {
+      home: normalizeTeamLineup({
+        lineup: lineups?.home,
+        fallbackCoach: event?.home_coach ?? event?.home_team_obj?.coach
+      }),
+      away: normalizeTeamLineup({
+        lineup: lineups?.away,
+        fallbackCoach: event?.away_coach ?? event?.away_team_obj?.coach
+      })
+    }
   };
 };
 
@@ -307,6 +440,24 @@ export const fetchMatchesForDateWindow = async ({
   const filtered = withCompetitionFilter(matches, competitionKey);
 
   return filtered.map(normalizeMatch).sort(sortByKickoff);
+};
+
+export const fetchMatchDetails = async ({ matchId }) => {
+  if (!config.apiKey) {
+    throw new Error("SPORTS_API_KEY is missing. Add it to backend/.env");
+  }
+
+  const normalizedMatchId = toNumber(matchId);
+
+  if (normalizedMatchId === null) {
+    throw new Error("Invalid match id");
+  }
+
+  const event = await fetchJson(`/events/${normalizedMatchId}/`, {
+    tz: config.apiTimezone
+  });
+
+  return normalizeMatchDetails(event);
 };
 
 export const fetchRelevantMatches = async () => {
