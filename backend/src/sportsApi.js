@@ -177,6 +177,10 @@ const normalizeMatch = (event) => {
   const homeTeamId = normalizeTeamId(event, "home");
   const awayTeamId = normalizeTeamId(event, "away");
   const competitionKey = resolveCompetitionKey(event);
+  const venueName =
+    event?.venue?.name ??
+    event?.venue_name ??
+    null;
 
   return {
     id: event?.id,
@@ -184,6 +188,7 @@ const normalizeMatch = (event) => {
     leagueName: event?.league?.name ?? "Unknown League",
     competitionKey,
     kickoffUtc: event?.event_date ?? null,
+    venueName,
     status: event?.status ?? "UNKNOWN",
     minute: event?.current_minute ?? null,
     homeTeamId,

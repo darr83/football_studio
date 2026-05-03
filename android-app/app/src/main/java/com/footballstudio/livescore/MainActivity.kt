@@ -4,9 +4,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,13 +14,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -332,34 +334,100 @@ private fun ScoresList(
 @Composable
 private fun MatchCard(match: ScoreMatch) {
     val isLive = isLiveMatchStatus(match.status)
+    val statusLabel = formatStatusLabel(match.status)
+    val minuteLabel = match.minute?.let { "$it'" }
 
     Card(
         border = if (isLive) {
-            androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.error)
+            BorderStroke(2.dp, MaterialTheme.colorScheme.secondary)
         } else {
             null
         }
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TeamLine(
-                teamName = match.homeTeam,
-                score = match.homeScore,
-                scorers = match.homeScorers,
-                badgeUrl = match.homeTeamBadgeUrl
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MatchTimer(
+                statusLabel = statusLabel,
+                minuteLabel = minuteLabel,
+                isLive = isLive
             )
 
-            TeamLine(
-                teamName = match.awayTeam,
-                score = match.awayScore,
-                scorers = match.awayScorers,
-                badgeUrl = match.awayTeamBadgeUrl
-            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TeamLine(
+                    teamName = match.homeTeam,
+                    score = match.homeScore,
+                    scorers = match.homeScorers,
+                    badgeUrl = match.homeTeamBadgeUrl
+                )
 
-            Text(
-                text = "${formatStatus(match.status, match.minute)} · Kickoff ${formatKickoffDateTime(match.kickoffUtc)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                TeamLine(
+                    teamName = match.awayTeam,
+                    score = match.awayScore,
+                    scorers = match.awayScorers,
+                    badgeUrl = match.awayTeamBadgeUrl
+                )
+
+                Text(
+                    text = "Kickoff ${formatKickoffTime(match.kickoffUtc)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(
+                    text = "Stadium: ${match.venueName ?: "TBD"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MatchTimer(
+    statusLabel: String,
+    minuteLabel: String?,
+    isLive: Boolean
+) {
+    Column(
+        modifier = Modifier
+            .width(62.dp)
+            .height(78.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = statusLabel,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = if (isLive) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (minuteLabel != null) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .background(
+                        color = if (isLive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = minuteLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isLive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -452,6 +520,19 @@ private fun formatScorers(scorers: List<GoalScorer>): String {
     return scorers.joinToString(" • ") { "${it.player} ${it.minuteLabel}" }
 }
 
+private fun formatStatusLabel(status: String?): String {
+    return when (status?.trim()?.lowercase()) {
+        "1st_half" -> "1st"
+        "2nd_half" -> "2nd"
+        "halftime" -> "HT"
+        "finished", "fulltime", "ft" -> "FT"
+        "notstarted", "scheduled" -> "NS"
+        "extra_time" -> "ET"
+        "penalties" -> "PEN"
+        else -> status?.take(4)?.uppercase() ?: "N/A"
+    }
+}
+
 private fun isLiveMatchStatus(status: String?): Boolean {
     val value = status?.trim()?.lowercase().orEmpty()
 
@@ -466,11 +547,6 @@ private fun isLiveMatchStatus(status: String?): Boolean {
         "break",
         "paused"
     )
-}
-
-private fun formatStatus(status: String?, minute: Int?): String {
-    val minuteText = minute?.let { "$it'" } ?: ""
-    return listOf(status.orEmpty(), minuteText).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Unknown" }
 }
 
 private fun parseApiDate(raw: String): Date? {
@@ -498,13 +574,13 @@ private fun parseApiDate(raw: String): Date? {
     return null
 }
 
-private fun formatKickoffDateTime(raw: String?): String {
+private fun formatKickoffTime(raw: String?): String {
     if (raw.isNullOrBlank()) {
         return "n/a"
     }
 
     val parsed = parseApiDate(raw) ?: return raw
-    val formatter = SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault())
+    val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
     formatter.timeZone = TimeZone.getDefault()
     return formatter.format(parsed)
 }

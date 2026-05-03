@@ -18,6 +18,7 @@ data class ScoreMatch(
     val leagueName: String,
     val competitionKey: String?,
     val kickoffUtc: String?,
+    val venueName: String?,
     val status: String?,
     val minute: Int?,
     val homeTeamId: Int?,
