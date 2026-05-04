@@ -55,6 +55,7 @@ class LiveScoreViewModel(
     private val seenTickerEventKeys = LinkedHashSet<String>()
     private var liveTickerJob: Job? = null
     private var isLiveTickerPrimed: Boolean = false
+    private var shouldRequestLiveWelcome: Boolean = false
 
     private val _uiState = MutableStateFlow(
         LiveScoresUiState(
@@ -143,6 +144,7 @@ class LiveScoreViewModel(
     fun openLiveTicker() {
         seenTickerEventKeys.clear()
         isLiveTickerPrimed = false
+        shouldRequestLiveWelcome = true
 
         _uiState.update {
             it.copy(
@@ -165,6 +167,7 @@ class LiveScoreViewModel(
         liveTickerJob?.cancel()
         liveTickerJob = null
         isLiveTickerPrimed = false
+        shouldRequestLiveWelcome = false
 
         _uiState.update {
             it.copy(
@@ -227,6 +230,7 @@ class LiveScoreViewModel(
         if (_uiState.value.isLiveTickerOpen) {
             seenTickerEventKeys.clear()
             isLiveTickerPrimed = false
+            shouldRequestLiveWelcome = false
 
             _uiState.update {
                 it.copy(
@@ -337,11 +341,36 @@ class LiveScoreViewModel(
         }
 
         runCatching {
-            repository.fetchLiveTicker(currentCompetitionKey)
+            repository.fetchLiveTicker(
+                competitionKey = currentCompetitionKey,
+                includeWelcome = shouldRequestLiveWelcome
+            )
         }
             .onSuccess { response ->
                 if (!_uiState.value.isLiveTickerOpen) {
                     return@onSuccess
+                }
+
+                val welcomeNarrationItems =
+                    if (shouldRequestLiveWelcome) {
+                        response.welcomeCommentary
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { welcomeText ->
+                                listOf(
+                                    LiveNarrationItem(
+                                        eventKey = "welcome-${response.lastUpdatedUtc ?: System.currentTimeMillis()}",
+                                        text = welcomeText
+                                    )
+                                )
+                            }
+                            ?: emptyList()
+                    } else {
+                        emptyList()
+                    }
+
+                if (shouldRequestLiveWelcome) {
+                    shouldRequestLiveWelcome = false
                 }
 
                 val newEvents = response.events.filter { seenTickerEventKeys.add(it.eventKey) }
@@ -371,7 +400,7 @@ class LiveScoreViewModel(
                     val merged = (newEvents + current.liveTickerEvents)
                         .distinctBy { it.eventKey }
                         .take(MAX_TICKER_EVENTS)
-                    val narrationQueue = (current.pendingNarration + narrationItems)
+                    val narrationQueue = (welcomeNarrationItems + current.pendingNarration + narrationItems)
                         .distinctBy { it.eventKey }
                         .takeLast(MAX_TICKER_NARRATION_ITEMS)
 

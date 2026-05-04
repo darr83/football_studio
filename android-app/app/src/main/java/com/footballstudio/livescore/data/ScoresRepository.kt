@@ -89,14 +89,20 @@ class ScoresRepository {
         )
     }
 
-    suspend fun fetchLiveTicker(competitionKey: String?): LiveTickerResponse {
+    suspend fun fetchLiveTicker(
+        competitionKey: String?,
+        includeWelcome: Boolean = false
+    ): LiveTickerResponse {
         val candidates = buildCandidateUrls(BuildConfig.BACKEND_BASE_URL)
         var lastError: Throwable? = null
         val errorsByUrl = mutableListOf<String>()
 
         for (url in candidates) {
             runCatching {
-                ScoresApiFactory.create(url).getLiveTicker(competitionKey)
+                ScoresApiFactory.create(url).getLiveTicker(
+                    competitionKey = competitionKey,
+                    includeWelcome = includeWelcome
+                )
             }
                 .onSuccess { return it }
                 .onFailure {

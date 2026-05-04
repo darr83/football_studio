@@ -27,7 +27,8 @@ interface ScoresApi {
 
     @GET("api/live-feed")
     suspend fun getLiveTicker(
-        @Query("competitionKey") competitionKey: String? = null
+        @Query("competitionKey") competitionKey: String? = null,
+        @Query("includeWelcome") includeWelcome: Boolean = false
     ): LiveTickerResponse
 }
 

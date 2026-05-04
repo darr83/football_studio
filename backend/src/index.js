@@ -1,6 +1,10 @@
 import cors from "cors";
 import express from "express";
-import { getAiCommentaryStatus, withAiCommentary } from "./aiCommentary.js";
+import {
+  generateLiveWelcomeCommentary,
+  getAiCommentaryStatus,
+  withAiCommentary
+} from "./aiCommentary.js";
 import { config } from "./config.js";
 import { getDateWindowState, getState, onUpdate, startScheduler } from "./cacheStore.js";
 import { fetchLiveTickerEvents, fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
@@ -149,6 +153,11 @@ const getCachedDateMatches = ({ dateIso, competitionKey }) => {
     hit: true,
     matches
   };
+};
+
+const toBooleanQuery = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 };
 
 const toTickerStatusEntries = (matches) => {
@@ -361,6 +370,7 @@ app.get("/api/live-feed", async (req, res) => {
   const competitionKey = req.query.competitionKey
     ? String(req.query.competitionKey)
     : null;
+  const includeWelcome = toBooleanQuery(req.query.includeWelcome);
 
   try {
     const liveEntries = await fetchLiveTickerEvents({ competitionKey });
@@ -373,12 +383,48 @@ app.get("/api/live-feed", async (req, res) => {
     }
 
     const eventsWithCommentary = await withAiCommentary(Array.from(merged.values()));
+    let welcomeCommentary = null;
+
+    if (includeWelcome) {
+      const snapshot = getState();
+      const liveMatchesForWelcome = competitionKey
+        ? snapshot.matches.filter((match) => match.competitionKey === competitionKey)
+        : snapshot.matches;
+
+      let todayMatchesForWelcome = cachedToday.hit ? cachedToday.matches : [];
+
+      if (!cachedToday.hit) {
+        try {
+          todayMatchesForWelcome = await fetchMatchesForDate({
+            dateIso: todayIso(),
+            competitionKey
+          });
+        } catch {
+          todayMatchesForWelcome = [];
+        }
+      }
+
+      const upcomingMatches = todayMatchesForWelcome.filter((match) => {
+        const status = toStatus(match);
+        return FIXTURE_STATUSES.has(status);
+      });
+      const totalGamesToday =
+        todayMatchesForWelcome.length > 0 ? todayMatchesForWelcome.length : liveMatchesForWelcome.length;
+
+      welcomeCommentary = await generateLiveWelcomeCommentary({
+        totalGamesToday,
+        liveMatches: liveMatchesForWelcome,
+        upcomingMatches,
+        competitionKey
+      });
+    }
 
     return res.json({
       source: "sports-api-live-feed",
       lastUpdatedUtc: new Date().toISOString(),
       events: eventsWithCommentary,
       ai: getAiCommentaryStatus(),
+      welcomeCommentary,
       error: null
     });
   } catch (error) {
@@ -387,6 +433,7 @@ app.get("/api/live-feed", async (req, res) => {
       lastUpdatedUtc: new Date().toISOString(),
       events: [],
       ai: getAiCommentaryStatus(),
+      welcomeCommentary: null,
       error: error instanceof Error ? error.message : "Unknown backend error"
     });
   }
