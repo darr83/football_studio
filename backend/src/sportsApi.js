@@ -11,8 +11,28 @@ const TARGET_COMPETITIONS = [
     aliases: ["championship"]
   },
   {
+    key: "ligue-1",
+    aliases: ["ligue 1", "ligue1", "french ligue 1"]
+  },
+  {
+    key: "bundesliga",
+    aliases: ["bundesliga", "german bundesliga"]
+  },
+  {
+    key: "la-liga",
+    aliases: ["la liga", "laliga", "spanish la liga", "primera division"]
+  },
+  {
     key: "fa-cup",
     aliases: ["fa cup"]
+  },
+  {
+    key: "coppa-italia",
+    aliases: ["coppa italia", "italy cup"]
+  },
+  {
+    key: "scottish-premiership",
+    aliases: ["scottish premiership", "premiership (scotland)", "scotland premiership"]
   },
   {
     key: "carabao-cup",

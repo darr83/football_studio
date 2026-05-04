@@ -44,6 +44,7 @@ data class LiveScoresUiState(
     val isLiveTickerLoading: Boolean = false,
     val liveTickerEvents: List<LiveTickerEvent> = emptyList(),
     val liveTickerLiveMatches: List<ScoreMatch> = emptyList(),
+    val liveTickerTodayResults: List<ScoreMatch> = emptyList(),
     val liveTickerTomorrowFixtures: List<ScoreMatch> = emptyList(),
     val liveTickerError: String? = null,
     val pendingNarration: List<LiveNarrationItem> = emptyList(),
@@ -68,6 +69,9 @@ class LiveScoreViewModel(
     private var cachedTomorrowFixturesDateIso: String? = null
     private var cachedTomorrowFixturesAtMs: Long = 0L
     private var cachedTomorrowFixtures: List<ScoreMatch> = emptyList()
+    private var cachedTodayResultsDateIso: String? = null
+    private var cachedTodayResultsAtMs: Long = 0L
+    private var cachedTodayResults: List<ScoreMatch> = emptyList()
 
     private val _uiState = MutableStateFlow(
         LiveScoresUiState(
@@ -166,6 +170,7 @@ class LiveScoreViewModel(
                 isLiveTickerLoading = true,
                 liveTickerEvents = emptyList(),
                 liveTickerLiveMatches = emptyList(),
+                liveTickerTodayResults = emptyList(),
                 liveTickerTomorrowFixtures = emptyList(),
                 liveTickerError = null,
                 pendingNarration = emptyList()
@@ -193,6 +198,7 @@ class LiveScoreViewModel(
                 isLiveTickerLoading = false,
                 liveTickerError = null,
                 liveTickerLiveMatches = emptyList(),
+                liveTickerTodayResults = emptyList(),
                 liveTickerTomorrowFixtures = emptyList(),
                 pendingNarration = emptyList()
             )
@@ -257,6 +263,7 @@ class LiveScoreViewModel(
                 it.copy(
                     liveTickerEvents = emptyList(),
                     liveTickerLiveMatches = emptyList(),
+                    liveTickerTodayResults = emptyList(),
                     liveTickerTomorrowFixtures = emptyList(),
                     liveTickerError = null,
                     isLiveTickerLoading = true,
@@ -408,8 +415,15 @@ class LiveScoreViewModel(
                     .sortedBy { it.kickoffUtc.orEmpty() }
 
                 val tomorrowFixtures =
-                    if (allLiveMatches.isEmpty() && response.events.isEmpty()) {
+                    if (allLiveMatches.isEmpty()) {
                         loadTomorrowFixturesFallback()
+                    } else {
+                        emptyList()
+                    }
+
+                val todayResults =
+                    if (allLiveMatches.isEmpty()) {
+                        loadTodayResultsFallback()
                     } else {
                         emptyList()
                     }
@@ -452,6 +466,7 @@ class LiveScoreViewModel(
                         isLiveTickerLoading = false,
                         liveTickerEvents = merged,
                         liveTickerLiveMatches = allLiveMatches,
+                        liveTickerTodayResults = todayResults,
                         liveTickerTomorrowFixtures = tomorrowFixtures,
                         liveTickerError = response.error,
                         pendingNarration = narrationQueue,
@@ -515,6 +530,35 @@ class LiveScoreViewModel(
         cachedTomorrowFixtures = fixtures
 
         return fixtures
+    }
+
+    private suspend fun loadTodayResultsFallback(): List<ScoreMatch> {
+        val todayIso = currentDateIsoUtc()
+        val nowMs = System.currentTimeMillis()
+
+        if (
+            cachedTodayResultsDateIso == todayIso &&
+                nowMs - cachedTodayResultsAtMs <= TODAY_RESULTS_CACHE_MS
+        ) {
+            return cachedTodayResults
+        }
+
+        val results = runCatching {
+            repository.fetchScores(
+                mode = "date",
+                date = todayIso,
+                competitionKey = null
+            ).matches
+        }
+            .getOrDefault(emptyList())
+            .filter { isResultRoundupMatch(it) }
+            .sortedWith(compareBy<ScoreMatch> { it.leagueName.lowercase() }.thenBy { it.kickoffUtc.orEmpty() })
+
+        cachedTodayResultsDateIso = todayIso
+        cachedTodayResultsAtMs = nowMs
+        cachedTodayResults = results
+
+        return results
     }
 
     private suspend fun queueLiveRoundupNarration(
@@ -684,6 +728,19 @@ class LiveScoreViewModel(
         ) || (match.homeScore == null && match.awayScore == null)
     }
 
+    private fun isResultRoundupMatch(match: ScoreMatch): Boolean {
+        val status = match.status?.trim()?.lowercase().orEmpty()
+
+        return status in setOf(
+            "finished",
+            "fulltime",
+            "ft",
+            "after_extra_time",
+            "aet",
+            "penalties"
+        ) || (match.homeScore != null && match.awayScore != null)
+    }
+
     private fun kickoffLabelFromIso(raw: String?): String {
         if (raw.isNullOrBlank()) {
             return "time to be confirmed"
@@ -768,6 +825,7 @@ class LiveScoreViewModel(
         const val POLL_INTERVAL_MS = 20_000L
         const val TICKER_POLL_INTERVAL_MS = 12_000L
         const val ROUNDUP_INTERVAL_MS = 5 * 60 * 1000L
+        const val TODAY_RESULTS_CACHE_MS = 60_000L
         const val TOMORROW_FIXTURES_CACHE_MS = 60_000L
         const val MAX_TICKER_EVENTS = 120
         const val MAX_TICKER_NARRATION_ITEMS = 30

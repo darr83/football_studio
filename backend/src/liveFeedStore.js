@@ -16,7 +16,12 @@ const DEFAULT_COMPETITION_KEYS = [
   null,
   "premier-league",
   "championship",
+  "ligue-1",
+  "bundesliga",
+  "la-liga",
   "fa-cup",
+  "coppa-italia",
+  "scottish-premiership",
   "carabao-cup",
   "champions-league",
   "europa-league"

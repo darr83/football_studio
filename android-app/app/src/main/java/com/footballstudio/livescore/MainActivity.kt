@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,14 +46,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -125,7 +134,15 @@ private val tickerHighlightHome = Color(0xFF1B5E20)
 private val tickerHighlightAway = Color(0xFF0D47A1)
 private const val LIVE_NARRATION_RATE = 0.95f
 private const val LIVE_NARRATION_PITCH = 1.0f
-private const val PREFER_AI_TTS_VOICE = true
+private const val TTS_PREFS_NAME = "live_tts_settings"
+private const val TTS_PREF_PREFER_AI_VOICE = "prefer_ai_voice"
+private const val TTS_PREF_SELECTED_VOICE = "selected_voice"
+private const val TTS_PREF_PITCH = "pitch"
+private const val TTS_PREF_SPEED = "speed"
+private const val TTS_PITCH_MIN = 0.7f
+private const val TTS_PITCH_MAX = 1.4f
+private const val TTS_SPEED_MIN = 0.7f
+private const val TTS_SPEED_MAX = 1.3f
 private val initialDotNameRegex = Regex("\\b[A-Za-z]\\.([A-Za-z][\\p{L}'-]*)\\b")
 private val leadingInitialNameRegex = Regex("^[A-Za-z]\\.\\s*([A-Za-z][\\p{L}'-]*)$")
 private val initialTokenRegex = Regex("^([A-Za-z]\\.?|([A-Za-z]\\.){2})$")
@@ -171,6 +188,18 @@ private data class LivePresentationMatchCard(
     val awaySubs: List<String>
 )
 
+private data class TtsNarrationSettings(
+    val preferAiVoice: Boolean = true,
+    val selectedVoiceName: String? = null,
+    val pitch: Float = LIVE_NARRATION_PITCH,
+    val speed: Float = LIVE_NARRATION_RATE
+)
+
+private data class TtsVoiceOption(
+    val name: String,
+    val label: String
+)
+
 private val competitionTabs = listOf(
     CompetitionTab(
         title = "Premier League",
@@ -183,9 +212,34 @@ private val competitionTabs = listOf(
         badgeUrl = "$LEAGUE_BADGE_BASE_URL/12/"
     ),
     CompetitionTab(
+        title = "Ligue 1",
+        key = "ligue-1",
+        badgeUrl = "$LEAGUE_BADGE_BASE_URL/6/"
+    ),
+    CompetitionTab(
+        title = "Bundesliga",
+        key = "bundesliga",
+        badgeUrl = "$LEAGUE_BADGE_BASE_URL/5/"
+    ),
+    CompetitionTab(
+        title = "La Liga",
+        key = "la-liga",
+        badgeUrl = "$LEAGUE_BADGE_BASE_URL/3/"
+    ),
+    CompetitionTab(
         title = "FA Cup",
         key = "fa-cup",
         badgeUrl = "$LEAGUE_BADGE_BASE_URL/39/"
+    ),
+    CompetitionTab(
+        title = "Coppa Italia",
+        key = "coppa-italia",
+        badgeUrl = "$LEAGUE_BADGE_BASE_URL/42/"
+    ),
+    CompetitionTab(
+        title = "Scottish Premiership",
+        key = "scottish-premiership",
+        badgeUrl = "$LEAGUE_BADGE_BASE_URL/13/"
     ),
     CompetitionTab(
         title = "Carabao Cup",
@@ -304,11 +358,14 @@ private fun LiveScoresScreen(
     onSetLiveAudioMuted: (Boolean) -> Unit
 ) {
     KeepScreenOnWhen(enabled = state.isLiveTickerOpen)
+    val context = LocalContext.current
 
     val timelineTabs = buildTimelineTabs()
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
     val todayLiveDefaultIndex = timelineTabs.indexOfFirst { it.mode == "today-live" }.coerceAtLeast(0)
     var selectedTimelineIndex by rememberSaveable { mutableStateOf(todayLiveDefaultIndex) }
+    var isTtsSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    var ttsSettings by remember { mutableStateOf(loadTtsNarrationSettings(context)) }
 
     val selectedCompetition = competitionTabs[selectedCompetitionIndex]
     val selectedTimeline = timelineTabs[selectedTimelineIndex]
@@ -325,6 +382,7 @@ private fun LiveScoresScreen(
         LiveTickerPresentationScreen(
             events = state.liveTickerEvents,
             liveMatches = state.liveTickerLiveMatches,
+            todayResults = state.liveTickerTodayResults,
             tomorrowFixtures = state.liveTickerTomorrowFixtures,
             isLoading = state.isLiveTickerLoading,
             error = state.liveTickerError,
@@ -337,10 +395,23 @@ private fun LiveScoresScreen(
         LiveTickerNarrator(
             queue = state.pendingNarration,
             isMuted = state.isLiveAudioMuted,
+            settings = ttsSettings,
             onConsume = onConsumeLiveNarration
         )
 
         return
+    }
+
+    if (isTtsSettingsOpen) {
+        TtsSettingsDialog(
+            settings = ttsSettings,
+            onDismiss = { isTtsSettingsOpen = false },
+            onSave = { updatedSettings ->
+                ttsSettings = updatedSettings
+                saveTtsNarrationSettings(context, updatedSettings)
+                isTtsSettingsOpen = false
+            }
+        )
     }
 
     Scaffold(
@@ -375,6 +446,14 @@ private fun LiveScoresScreen(
                                     color = if (state.isLiveTickerOpen) redCardTextColor else MaterialTheme.colorScheme.onPrimary
                                 )
                             }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { isTtsSettingsOpen = true }) {
+                            Icon(
+                                painter = painterResource(id = android.R.drawable.ic_menu_manage),
+                                contentDescription = "Open voice settings"
+                            )
                         }
                     }
                 )
@@ -432,6 +511,243 @@ private fun LiveScoresScreen(
             )
         }
     }
+}
+
+@Composable
+private fun TtsSettingsDialog(
+    settings: TtsNarrationSettings,
+    onDismiss: () -> Unit,
+    onSave: (TtsNarrationSettings) -> Unit
+) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    var isVoiceMenuExpanded by remember { mutableStateOf(false) }
+    val voices = rememberAvailableNarrationVoices()
+    val selectedVoiceLabel = voices
+        .firstOrNull { it.name == draft.selectedVoiceName }
+        ?.label
+        ?: "Auto (best available)"
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "Voice Settings",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Prefer AI voice",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Prioritise network/neural voices when available",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = draft.preferAiVoice,
+                        onCheckedChange = { checked ->
+                            draft = draft.copy(preferAiVoice = checked)
+                        }
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Voice",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Box {
+                        OutlinedButton(onClick = { isVoiceMenuExpanded = true }) {
+                            Text(selectedVoiceLabel)
+                        }
+
+                        DropdownMenu(
+                            expanded = isVoiceMenuExpanded,
+                            onDismissRequest = { isVoiceMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = 340.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Auto (best available)") },
+                                onClick = {
+                                    draft = draft.copy(selectedVoiceName = null)
+                                    isVoiceMenuExpanded = false
+                                }
+                            )
+
+                            voices.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    onClick = {
+                                        draft = draft.copy(selectedVoiceName = option.name)
+                                        isVoiceMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Pitch: ${formatTtsValue(draft.pitch)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Slider(
+                        value = draft.pitch,
+                        onValueChange = { draft = draft.copy(pitch = clampTtsPitch(it)) },
+                        valueRange = TTS_PITCH_MIN..TTS_PITCH_MAX
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Speed: ${formatTtsValue(draft.speed)}x",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Slider(
+                        value = draft.speed,
+                        onValueChange = { draft = draft.copy(speed = clampTtsSpeed(it)) },
+                        valueRange = TTS_SPEED_MIN..TTS_SPEED_MAX
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+
+                    TextButton(
+                        onClick = {
+                            onSave(
+                                draft.copy(
+                                    pitch = clampTtsPitch(draft.pitch),
+                                    speed = clampTtsSpeed(draft.speed)
+                                )
+                            )
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberAvailableNarrationVoices(): List<TtsVoiceOption> {
+    val context = LocalContext.current
+    val voiceOptions = remember { mutableStateOf<List<TtsVoiceOption>>(emptyList()) }
+
+    DisposableEffect(context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            voiceOptions.value = emptyList()
+            onDispose {}
+        } else {
+            var engineRef: TextToSpeech? = null
+            val engine = TextToSpeech(context) { status ->
+                if (status != TextToSpeech.SUCCESS) {
+                    return@TextToSpeech
+                }
+
+                val readyEngine = engineRef ?: return@TextToSpeech
+                val locale = configureNarrationLocale(readyEngine)
+                voiceOptions.value = readyEngine.voices
+                    ?.asSequence()
+                    ?.filter { voice ->
+                        val voiceLocale = voice.locale ?: return@filter false
+                        val sameLanguage =
+                            voiceLocale.language.equals(locale.language, ignoreCase = true)
+                        val isNotInstalled =
+                            voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+                        sameLanguage && !isNotInstalled
+                    }
+                    ?.sortedByDescending { voice ->
+                        narrationVoiceScore(voice, locale, preferAiVoice = true)
+                    }
+                    ?.map { voice ->
+                        TtsVoiceOption(
+                            name = voice.name,
+                            label = buildTtsVoiceLabel(voice)
+                        )
+                    }
+                    ?.distinctBy { it.name }
+                    ?.take(50)
+                    ?.toList()
+                    ?: emptyList()
+            }
+                    engineRef = engine
+
+            onDispose {
+                engine.stop()
+                engine.shutdown()
+            }
+        }
+    }
+
+    return voiceOptions.value
+}
+
+private fun loadTtsNarrationSettings(context: Context): TtsNarrationSettings {
+    val preferences = context.getSharedPreferences(TTS_PREFS_NAME, Context.MODE_PRIVATE)
+
+    return TtsNarrationSettings(
+        preferAiVoice = preferences.getBoolean(TTS_PREF_PREFER_AI_VOICE, true),
+        selectedVoiceName = preferences.getString(TTS_PREF_SELECTED_VOICE, null)?.takeIf { it.isNotBlank() },
+        pitch = clampTtsPitch(preferences.getFloat(TTS_PREF_PITCH, LIVE_NARRATION_PITCH)),
+        speed = clampTtsSpeed(preferences.getFloat(TTS_PREF_SPEED, LIVE_NARRATION_RATE))
+    )
+}
+
+private fun saveTtsNarrationSettings(context: Context, settings: TtsNarrationSettings) {
+    context.getSharedPreferences(TTS_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(TTS_PREF_PREFER_AI_VOICE, settings.preferAiVoice)
+        .putString(TTS_PREF_SELECTED_VOICE, settings.selectedVoiceName)
+        .putFloat(TTS_PREF_PITCH, clampTtsPitch(settings.pitch))
+        .putFloat(TTS_PREF_SPEED, clampTtsSpeed(settings.speed))
+        .apply()
+}
+
+private fun clampTtsPitch(value: Float): Float {
+    return value.coerceIn(TTS_PITCH_MIN, TTS_PITCH_MAX)
+}
+
+private fun clampTtsSpeed(value: Float): Float {
+    return value.coerceIn(TTS_SPEED_MIN, TTS_SPEED_MAX)
+}
+
+private fun formatTtsValue(value: Float): String {
+    return String.format(Locale.US, "%.2f", value)
+}
+
+private fun buildTtsVoiceLabel(voice: Voice): String {
+    val localeTag = voice.locale?.toLanguageTag() ?: "default"
+    val style = if (voice.isNetworkConnectionRequired) "AI" else "Local"
+    return "$style • ${voice.name} • $localeTag"
 }
 
 @Composable
@@ -924,6 +1240,7 @@ private fun MatchDetailsDialog(
 private fun LiveTickerPresentationScreen(
     events: List<LiveTickerEvent>,
     liveMatches: List<ScoreMatch>,
+    todayResults: List<ScoreMatch>,
     tomorrowFixtures: List<ScoreMatch>,
     isLoading: Boolean,
     error: String?,
@@ -965,19 +1282,24 @@ private fun LiveTickerPresentationScreen(
     }
 
     val selectedCard = cards.getOrNull(selectedCardIndex)
-    val bottomTickerText = remember(cards, tomorrowFixtures) {
-        buildLiveBottomTickerText(cards = cards, tomorrowFixtures = tomorrowFixtures)
+    val bottomTickerText = remember(cards, todayResults, tomorrowFixtures) {
+        buildLiveBottomTickerText(
+            cards = cards,
+            todayResults = todayResults,
+            tomorrowFixtures = tomorrowFixtures
+        )
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B1F5E))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .background(Color(0xFF0B1F5E)),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1034,7 +1356,8 @@ private fun LiveTickerPresentationScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Card(
@@ -1183,6 +1506,7 @@ private fun LiveTickerPresentationScreen(
         if (!error.isNullOrBlank()) {
             Text(
                 text = "Issue: $error",
+                modifier = Modifier.padding(horizontal = 14.dp),
                 color = Color(0xFFFFCDD2),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold
@@ -1191,6 +1515,7 @@ private fun LiveTickerPresentationScreen(
 
         Text(
             text = buildAiStatusLine(aiStatus),
+            modifier = Modifier.padding(horizontal = 14.dp),
             color = Color(0xFFE2E8FF),
             style = MaterialTheme.typography.bodySmall
         )
@@ -1198,7 +1523,7 @@ private fun LiveTickerPresentationScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFFFFF59D), RoundedCornerShape(6.dp))
+                .background(Color(0xFFFFF59D))
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
             Text(
@@ -1402,7 +1727,12 @@ private fun buildLivePresentationCards(
     events: List<LiveTickerEvent>,
     liveMatches: List<ScoreMatch>
 ): List<LivePresentationMatchCard> {
+    if (liveMatches.isEmpty()) {
+        return emptyList()
+    }
+
     val cards = linkedMapOf<String, LivePresentationMatchCard>()
+    val liveKeys = linkedSetOf<String>()
 
     fun keyOf(competitionName: String, homeTeam: String, awayTeam: String): String {
         return "${competitionName.lowercase()}|${homeTeam.lowercase()}|${awayTeam.lowercase()}"
@@ -1410,6 +1740,7 @@ private fun buildLivePresentationCards(
 
     liveMatches.forEach { match ->
         val key = keyOf(match.leagueName, match.homeTeam, match.awayTeam)
+        liveKeys += key
         cards[key] = LivePresentationMatchCard(
             key = key,
             competitionName = match.leagueName,
@@ -1433,12 +1764,16 @@ private fun buildLivePresentationCards(
         val key = keyOf(event.competitionName, event.homeTeam, event.awayTeam)
         val existing = cards[key]
 
-        val homeScorers = existing?.homeScorers?.toMutableList() ?: mutableListOf()
-        val awayScorers = existing?.awayScorers?.toMutableList() ?: mutableListOf()
-        val homeCards = existing?.homeCards?.toMutableList() ?: mutableListOf()
-        val awayCards = existing?.awayCards?.toMutableList() ?: mutableListOf()
-        val homeSubs = existing?.homeSubs?.toMutableList() ?: mutableListOf()
-        val awaySubs = existing?.awaySubs?.toMutableList() ?: mutableListOf()
+        if (existing == null || !liveKeys.contains(key)) {
+            return@forEach
+        }
+
+        val homeScorers = existing.homeScorers.toMutableList()
+        val awayScorers = existing.awayScorers.toMutableList()
+        val homeCards = existing.homeCards.toMutableList()
+        val awayCards = existing.awayCards.toMutableList()
+        val homeSubs = existing.homeSubs.toMutableList()
+        val awaySubs = existing.awaySubs.toMutableList()
 
         val minuteText = event.minuteLabel?.takeIf { it.isNotBlank() }?.let { " (${it.trim()})" }.orEmpty()
         val playerName = event.playerName?.takeIf { it.isNotBlank() }
@@ -1487,14 +1822,14 @@ private fun buildLivePresentationCards(
 
         cards[key] = LivePresentationMatchCard(
             key = key,
-            competitionName = existing?.competitionName ?: event.competitionName,
-            homeTeam = existing?.homeTeam ?: event.homeTeam,
-            awayTeam = existing?.awayTeam ?: event.awayTeam,
-            homeScore = event.homeScore ?: existing?.homeScore,
-            awayScore = event.awayScore ?: existing?.awayScore,
-            minuteLabel = event.minuteLabel ?: existing?.minuteLabel,
-            homeBadgeUrl = existing?.homeBadgeUrl,
-            awayBadgeUrl = existing?.awayBadgeUrl,
+            competitionName = existing.competitionName,
+            homeTeam = existing.homeTeam,
+            awayTeam = existing.awayTeam,
+            homeScore = event.homeScore ?: existing.homeScore,
+            awayScore = event.awayScore ?: existing.awayScore,
+            minuteLabel = event.minuteLabel ?: existing.minuteLabel,
+            homeBadgeUrl = existing.homeBadgeUrl,
+            awayBadgeUrl = existing.awayBadgeUrl,
             homeScorers = homeScorers,
             awayScorers = awayScorers,
             homeCards = homeCards,
@@ -1510,27 +1845,59 @@ private fun buildLivePresentationCards(
 
 private fun buildLiveBottomTickerText(
     cards: List<LivePresentationMatchCard>,
+    todayResults: List<ScoreMatch>,
     tomorrowFixtures: List<ScoreMatch>
 ): String {
     if (cards.isNotEmpty()) {
-        return cards.joinToString("   •   ") { card ->
+        val liveText = cards.joinToString("   •   ") { card ->
             "${card.competitionName.uppercase(Locale.ROOT)} ${card.homeTeam} ${card.homeScore ?: "-"} ${card.awayTeam} ${card.awayScore ?: "-"} (${toPresentationMinute(card.minuteLabel)})"
         }
+
+        return toAlwaysScrollingTicker(liveText)
+    }
+
+    val sections = mutableListOf<String>()
+
+    if (todayResults.isNotEmpty()) {
+        val resultsText = todayResults.joinToString(" | ") { result ->
+            "${result.leagueName.uppercase(Locale.ROOT)} ${result.homeTeam} ${toTickerScoreToken(result.homeScore)} ${result.awayTeam} ${toTickerScoreToken(result.awayScore)}"
+        }
+
+        sections += "TODAY RESULTS: $resultsText"
     }
 
     if (tomorrowFixtures.isNotEmpty()) {
         val grouped = tomorrowFixtures.groupBy { it.leagueName }
 
-        return grouped.entries.joinToString("   •   ") { (league, fixtures) ->
+        val tomorrowText = grouped.entries.joinToString("   •   ") { (league, fixtures) ->
             val fixturesText = fixtures.joinToString(" | ") { fixture ->
                 "${fixture.homeTeam} v ${fixture.awayTeam} ${formatKickoffTime(fixture.kickoffUtc)}"
             }
 
             "${league.uppercase(Locale.ROOT)}: $fixturesText"
         }
+
+        sections += "TOMORROW FIXTURES: $tomorrowText"
     }
 
-    return "NO LIVE GAMES RIGHT NOW. CHECK BACK SOON FOR LIVE SCORES."
+    if (sections.isNotEmpty()) {
+        return toAlwaysScrollingTicker(sections.joinToString("   •   "))
+    }
+
+    return toAlwaysScrollingTicker("NO LIVE GAMES RIGHT NOW. CHECK BACK SOON FOR LIVE SCORES.")
+}
+
+private fun toTickerScoreToken(score: Int?): String {
+    return when (score) {
+        null -> "-"
+        0 -> "nil"
+        else -> score.toString()
+    }
+}
+
+private fun toAlwaysScrollingTicker(raw: String): String {
+    val base = raw.trim().ifBlank { "LIVE TICKER" }
+    return List(4) { base }.joinToString("   •   ")
 }
 
 private fun toPresentationMinute(minuteLabel: String?): String {
@@ -1962,6 +2329,7 @@ private fun tickerEventPalette(event: LiveTickerEvent): TickerEventPalette {
 private fun LiveTickerNarrator(
     queue: List<LiveNarrationItem>,
     isMuted: Boolean,
+    settings: TtsNarrationSettings,
     onConsume: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -1972,23 +2340,6 @@ private fun LiveTickerNarrator(
         val tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isReady = true
-
-                val engine = ttsState.value
-                if (engine != null) {
-                    val selectedLocale = configureNarrationLocale(engine)
-                    configureNarrationVoice(engine, selectedLocale)
-                    engine.setSpeechRate(LIVE_NARRATION_RATE)
-                    engine.setPitch(LIVE_NARRATION_PITCH)
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        engine.setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        )
-                    }
-                }
             }
         }
 
@@ -1999,6 +2350,27 @@ private fun LiveTickerNarrator(
             tts.shutdown()
             ttsState.value = null
             isReady = false
+        }
+    }
+
+    LaunchedEffect(isReady, settings) {
+        if (!isReady) {
+            return@LaunchedEffect
+        }
+
+        val engine = ttsState.value ?: return@LaunchedEffect
+        val selectedLocale = configureNarrationLocale(engine)
+        configureNarrationVoice(engine, selectedLocale, settings)
+        engine.setSpeechRate(clampTtsSpeed(settings.speed))
+        engine.setPitch(clampTtsPitch(settings.pitch))
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            engine.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
         }
     }
 
@@ -2048,12 +2420,16 @@ private fun configureNarrationLocale(engine: TextToSpeech): Locale {
     return Locale.getDefault()
 }
 
-private fun configureNarrationVoice(engine: TextToSpeech, locale: Locale) {
+private fun configureNarrationVoice(
+    engine: TextToSpeech,
+    locale: Locale,
+    settings: TtsNarrationSettings
+) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
         return
     }
 
-    val selectedVoice = engine.voices
+    val candidateVoices = engine.voices
         ?.asSequence()
         ?.filter { voice ->
             val voiceLocale = voice.locale ?: return@filter false
@@ -2062,14 +2438,34 @@ private fun configureNarrationVoice(engine: TextToSpeech, locale: Locale) {
                 voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
             sameLanguage && !isNotInstalled
         }
-        ?.maxByOrNull { voice -> narrationVoiceScore(voice, locale) }
+        ?.toList()
+        .orEmpty()
+
+    val selectedByName = settings.selectedVoiceName
+        ?.takeIf { it.isNotBlank() }
+        ?.let { selectedVoiceName ->
+            candidateVoices.firstOrNull { voice -> voice.name == selectedVoiceName }
+        }
+
+    val selectedVoice = selectedByName
+        ?: candidateVoices.maxByOrNull { voice ->
+            narrationVoiceScore(
+                voice = voice,
+                locale = locale,
+                preferAiVoice = settings.preferAiVoice
+            )
+        }
 
     if (selectedVoice != null) {
         engine.voice = selectedVoice
     }
 }
 
-private fun narrationVoiceScore(voice: Voice, locale: Locale): Int {
+private fun narrationVoiceScore(
+    voice: Voice,
+    locale: Locale,
+    preferAiVoice: Boolean
+): Int {
     var score = 0
     val voiceLocale = voice.locale
 
@@ -2082,9 +2478,9 @@ private fun narrationVoiceScore(voice: Voice, locale: Locale): Int {
     }
 
     if (voice.isNetworkConnectionRequired) {
-        score += if (PREFER_AI_TTS_VOICE) 85 else -8
+        score += if (preferAiVoice) 85 else -8
     } else {
-        score += if (PREFER_AI_TTS_VOICE) 6 else 20
+        score += if (preferAiVoice) 6 else 20
     }
 
     score += voice.quality
@@ -2099,7 +2495,7 @@ private fun narrationVoiceScore(voice: Voice, locale: Locale): Int {
         normalizedName.contains("wavenet") ||
         normalizedName.contains("studio")
     ) {
-        score += if (PREFER_AI_TTS_VOICE) 80 else 40
+        score += if (preferAiVoice) 80 else 40
     }
 
     if (
@@ -2161,7 +2557,12 @@ private fun toTickerCompetitionCode(competitionName: String): String {
     return when (competitionName.lowercase()) {
         "premier league" -> "EPL"
         "championship" -> "CH"
+        "ligue 1" -> "L1"
+        "bundesliga" -> "BUN"
+        "la liga" -> "LL"
         "fa cup" -> "FAC"
+        "coppa italia" -> "COP"
+        "scottish premiership" -> "SP"
         "carabao cup" -> "EFL"
         "champions league" -> "UCL"
         "europa league" -> "UEL"
