@@ -40,6 +40,7 @@ const fallbackCommentary = (event) => {
   const awayTeam = toSafeString(event?.awayTeam) || "Away";
   const score = `${event?.homeScore ?? "-"}-${event?.awayScore ?? "-"}`;
   const player = toSafeString(event?.playerName);
+  const playerOut = toSafeString(event?.playerOutName);
 
   switch (event?.eventType) {
     case "goal":
@@ -54,6 +55,12 @@ const fallbackCommentary = (event) => {
       return player ? `Yellow card shown to ${player}.` : "Yellow card shown.";
     case "red-card":
       return player ? `Red card shown to ${player}.` : "Red card shown.";
+    case "substitution":
+      return player && playerOut
+        ? `Substitution: ${player} replaces ${playerOut}.`
+        : player
+          ? `Substitution: ${player} comes on.`
+          : "Substitution made.";
     case "half-time":
       return `Half-time: ${homeTeam} ${score} ${awayTeam}.`;
     case "full-time":
@@ -183,7 +190,9 @@ const buildPromptEvents = (events) => {
     homeScore: event.homeScore,
     awayScore: event.awayScore,
     minuteLabel: event.minuteLabel,
-    playerName: event.playerName
+    playerName: event.playerName,
+    playerOutName: event.playerOutName,
+    message: event.message
   }));
 };
 

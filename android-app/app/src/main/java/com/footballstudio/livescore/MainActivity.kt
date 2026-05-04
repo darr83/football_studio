@@ -1113,6 +1113,7 @@ private fun toTickerStatusLabel(event: LiveTickerEvent): String {
     return when (event.eventType) {
         "goal" -> "GL"
         "penalty" -> "PEN"
+        "substitution" -> "SUB"
         "yellow-card" -> "YC"
         "red-card" -> "RC"
         "half-time" -> "HT"
@@ -1155,10 +1156,16 @@ private fun toTickerCompetitionCode(competitionName: String): String {
 
 private fun toTickerEventSuffix(event: LiveTickerEvent): String {
     val player = event.playerName?.takeIf { it.isNotBlank() }
+    val playerOut = event.playerOutName?.takeIf { it.isNotBlank() }
 
     return when (event.eventType) {
         "goal" -> if (player != null) "GOAL $player" else "GOAL"
         "penalty" -> if (player != null) "PENALTY GOAL $player" else "PENALTY GOAL"
+        "substitution" -> when {
+            player != null && playerOut != null -> "SUBSTITUTION $player FOR $playerOut"
+            player != null -> "SUBSTITUTION $player ON"
+            else -> "SUBSTITUTION"
+        }
         "yellow-card" -> if (player != null) "YELLOW CARD $player" else "YELLOW CARD"
         "red-card" -> if (player != null) "RED CARD $player" else "RED CARD"
         "half-time" -> "HALF TIME"

@@ -136,6 +136,7 @@ data class LiveTickerEvent(
     val awayScore: Int? = null,
     val minuteLabel: String? = null,
     val playerName: String? = null,
+    val playerOutName: String? = null,
     val message: String,
     val commentary: String? = null
 )

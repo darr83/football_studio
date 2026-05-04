@@ -487,6 +487,46 @@ const normalizeTickerIncident = (event, incident) => {
     };
   }
 
+  if (incidentType === "substitution") {
+    const playerIn = incident?.player_in ? String(incident.player_in) : null;
+    const playerOut = incident?.player_out ? String(incident.player_out) : null;
+    const substitutionDetail =
+      playerIn && playerOut
+        ? `${playerIn} for ${playerOut}`
+        : playerIn ?? playerOut;
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentType,
+        minuteLabel,
+        String(playerIn ?? ""),
+        String(playerOut ?? "")
+      ].join(":"),
+      eventType: "substitution",
+      teamSide,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel,
+      playerName: playerIn,
+      playerOutName: playerOut,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel: "SUBSTITUTION",
+        playerName: substitutionDetail
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
   return null;
 };
 
