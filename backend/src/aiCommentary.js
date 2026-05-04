@@ -4,6 +4,20 @@ import { config } from "./config.js";
 const MAX_COMMENTARY_CACHE = 800;
 const MAX_NEW_EVENTS_PER_AI_CALL = 24;
 const commentaryCache = new Map();
+const aiRuntimeState = {
+  enabled: config.aiCommentaryEnabled,
+  hasApiKey: Boolean(config.openAiApiKey),
+  status: config.aiCommentaryEnabled
+    ? (config.openAiApiKey ? "active" : "missing-key")
+    : "disabled",
+  error: null,
+  model: config.openAiModel || null,
+  lastUpdatedUtc: new Date().toISOString()
+};
+
+const setAiRuntimeState = (patch) => {
+  Object.assign(aiRuntimeState, patch, { lastUpdatedUtc: new Date().toISOString() });
+};
 
 const trimCache = () => {
   while (commentaryCache.size > MAX_COMMENTARY_CACHE) {
@@ -176,6 +190,16 @@ const generateAiCommentaryMap = async (events) => {
 
 export const withAiCommentary = async (events) => {
   if (!Array.isArray(events) || events.length === 0) {
+    setAiRuntimeState({
+      enabled: config.aiCommentaryEnabled,
+      hasApiKey: Boolean(config.openAiApiKey),
+      status: config.aiCommentaryEnabled
+        ? (config.openAiApiKey ? "active" : "missing-key")
+        : "disabled",
+      error: null,
+      model: config.openAiModel || null
+    });
+
     return [];
   }
 
@@ -185,8 +209,39 @@ export const withAiCommentary = async (events) => {
 
   const aiBatch = withoutCache.slice(0, MAX_NEW_EVENTS_PER_AI_CALL);
 
+  setAiRuntimeState({
+    enabled: config.aiCommentaryEnabled,
+    hasApiKey: Boolean(config.openAiApiKey),
+    model: config.openAiModel || null
+  });
+
   if (aiBatch.length > 0) {
-    const aiMap = await generateAiCommentaryMap(aiBatch).catch(() => new Map());
+    let aiMap = new Map();
+
+    if (!config.aiCommentaryEnabled) {
+      setAiRuntimeState({
+        status: "disabled",
+        error: null
+      });
+    } else if (!config.openAiApiKey) {
+      setAiRuntimeState({
+        status: "missing-key",
+        error: "OPENAI_API_KEY is not configured"
+      });
+    } else {
+      try {
+        aiMap = await generateAiCommentaryMap(aiBatch);
+        setAiRuntimeState({
+          status: aiMap.size > 0 ? "active" : "fallback",
+          error: aiMap.size > 0 ? null : "AI returned empty commentary; using fallback lines"
+        });
+      } catch (error) {
+        setAiRuntimeState({
+          status: "fallback",
+          error: error instanceof Error ? error.message : "AI commentary request failed"
+        });
+      }
+    }
 
     for (const event of aiBatch) {
       const fallback = fallbackCommentary(event);
@@ -212,4 +267,21 @@ export const withAiCommentary = async (events) => {
       commentary
     };
   });
+};
+
+export const getAiCommentaryStatus = () => {
+  return {
+    enabled: Boolean(aiRuntimeState.enabled),
+    hasApiKey: Boolean(aiRuntimeState.hasApiKey),
+    status: String(aiRuntimeState.status ?? "unknown"),
+    error:
+      typeof aiRuntimeState.error === "string" && aiRuntimeState.error.trim().length > 0
+        ? aiRuntimeState.error
+        : null,
+    model:
+      typeof aiRuntimeState.model === "string" && aiRuntimeState.model.trim().length > 0
+        ? aiRuntimeState.model
+        : null,
+    lastUpdatedUtc: aiRuntimeState.lastUpdatedUtc
+  };
 };

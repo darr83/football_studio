@@ -1,6 +1,6 @@
 import cors from "cors";
 import express from "express";
-import { withAiCommentary } from "./aiCommentary.js";
+import { getAiCommentaryStatus, withAiCommentary } from "./aiCommentary.js";
 import { config } from "./config.js";
 import { getDateWindowState, getState, onUpdate, startScheduler } from "./cacheStore.js";
 import { fetchLiveTickerEvents, fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
@@ -378,6 +378,7 @@ app.get("/api/live-feed", async (req, res) => {
       source: "sports-api-live-feed",
       lastUpdatedUtc: new Date().toISOString(),
       events: eventsWithCommentary,
+      ai: getAiCommentaryStatus(),
       error: null
     });
   } catch (error) {
@@ -385,6 +386,7 @@ app.get("/api/live-feed", async (req, res) => {
       source: "error",
       lastUpdatedUtc: new Date().toISOString(),
       events: [],
+      ai: getAiCommentaryStatus(),
       error: error instanceof Error ? error.message : "Unknown backend error"
     });
   }

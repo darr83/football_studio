@@ -111,7 +111,17 @@ data class LiveTickerResponse(
     val source: String,
     @Json(name = "lastUpdatedUtc") val lastUpdatedUtc: String?,
     val events: List<LiveTickerEvent> = emptyList(),
+    val ai: LiveTickerAiStatus? = null,
     val error: String?
+)
+
+data class LiveTickerAiStatus(
+    val enabled: Boolean = false,
+    val hasApiKey: Boolean = false,
+    val status: String = "unknown",
+    val error: String? = null,
+    val model: String? = null,
+    @Json(name = "lastUpdatedUtc") val lastUpdatedUtc: String? = null
 )
 
 data class LiveTickerEvent(

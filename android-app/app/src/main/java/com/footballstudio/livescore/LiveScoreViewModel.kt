@@ -3,6 +3,7 @@ package com.footballstudio.livescore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.footballstudio.livescore.data.LiveTickerEvent
+import com.footballstudio.livescore.data.LiveTickerAiStatus
 import com.footballstudio.livescore.data.MatchDetails
 import com.footballstudio.livescore.data.ScoreMatch
 import com.footballstudio.livescore.data.ScoresResponse
@@ -38,7 +39,9 @@ data class LiveScoresUiState(
     val isLiveTickerLoading: Boolean = false,
     val liveTickerEvents: List<LiveTickerEvent> = emptyList(),
     val liveTickerError: String? = null,
-    val pendingNarration: List<LiveNarrationItem> = emptyList()
+    val pendingNarration: List<LiveNarrationItem> = emptyList(),
+    val isLiveAudioMuted: Boolean = false,
+    val liveTickerAiStatus: LiveTickerAiStatus? = null
 )
 
 class LiveScoreViewModel(
@@ -173,6 +176,10 @@ class LiveScoreViewModel(
         }
     }
 
+    fun setLiveAudioMuted(muted: Boolean) {
+        _uiState.update { it.copy(isLiveAudioMuted = muted) }
+    }
+
     fun consumeLiveNarration(eventKey: String) {
         _uiState.update {
             it.copy(
@@ -226,7 +233,8 @@ class LiveScoreViewModel(
                     liveTickerEvents = emptyList(),
                     liveTickerError = null,
                     isLiveTickerLoading = true,
-                    pendingNarration = emptyList()
+                    pendingNarration = emptyList(),
+                    liveTickerAiStatus = null
                 )
             }
 
@@ -374,7 +382,8 @@ class LiveScoreViewModel(
                         isLiveTickerLoading = false,
                         liveTickerEvents = merged,
                         liveTickerError = response.error,
-                        pendingNarration = narrationQueue
+                        pendingNarration = narrationQueue,
+                        liveTickerAiStatus = response.ai
                     )
                 }
             }

@@ -70,6 +70,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.footballstudio.livescore.data.GoalScorer
+import com.footballstudio.livescore.data.LiveTickerAiStatus
 import com.footballstudio.livescore.data.LiveTickerEvent
 import com.footballstudio.livescore.data.LineupPlayer
 import com.footballstudio.livescore.data.MatchDetails
@@ -202,7 +203,8 @@ class MainActivity : ComponentActivity() {
                         onDismissMatchDetails = viewModel::dismissMatchDetails,
                         onOpenLiveTicker = viewModel::openLiveTicker,
                         onCloseLiveTicker = viewModel::closeLiveTicker,
-                        onConsumeLiveNarration = viewModel::consumeLiveNarration
+                        onConsumeLiveNarration = viewModel::consumeLiveNarration,
+                        onSetLiveAudioMuted = viewModel::setLiveAudioMuted
                     )
                 }
             }
@@ -219,7 +221,8 @@ private fun LiveScoresScreen(
     onDismissMatchDetails: () -> Unit,
     onOpenLiveTicker: () -> Unit,
     onCloseLiveTicker: () -> Unit,
-    onConsumeLiveNarration: (String) -> Unit
+    onConsumeLiveNarration: (String) -> Unit,
+    onSetLiveAudioMuted: (Boolean) -> Unit
 ) {
     val timelineTabs = buildTimelineTabs()
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
@@ -331,11 +334,15 @@ private fun LiveScoresScreen(
                 events = state.liveTickerEvents,
                 isLoading = state.isLiveTickerLoading,
                 error = state.liveTickerError,
+                aiStatus = state.liveTickerAiStatus,
+                isAudioMuted = state.isLiveAudioMuted,
+                onToggleMute = { onSetLiveAudioMuted(!state.isLiveAudioMuted) },
                 onDismiss = onCloseLiveTicker
             )
 
             LiveTickerNarrator(
                 queue = state.pendingNarration,
+                isMuted = state.isLiveAudioMuted,
                 onConsume = onConsumeLiveNarration
             )
         }
@@ -813,6 +820,9 @@ private fun LiveTickerDialog(
     events: List<LiveTickerEvent>,
     isLoading: Boolean,
     error: String?,
+    aiStatus: LiveTickerAiStatus?,
+    isAudioMuted: Boolean,
+    onToggleMute: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -840,14 +850,34 @@ private fun LiveTickerDialog(
                         fontWeight = FontWeight.ExtraBold,
                         color = tickerTextColor
                     )
-                    Text(
-                        text = "Close",
-                        color = tickerTextColor,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable(onClick = onDismiss)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isAudioMuted) "Unmute" else "Mute",
+                            color = tickerTextColor,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable(onClick = onToggleMute)
+                        )
+                        Text(
+                            text = "Close",
+                            color = tickerTextColor,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable(onClick = onDismiss)
+                        )
+                    }
                 }
+
+                Text(
+                    text = if (isAudioMuted) "Audio: MUTED" else "Audio: LIVE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = tickerTextColor
+                )
 
                 when {
                     isLoading && events.isEmpty() -> {
@@ -859,7 +889,7 @@ private fun LiveTickerDialog(
                         ) {
                             CircularProgressIndicator()
                         }
-                    }
+                        }
 
                     !error.isNullOrBlank() && events.isEmpty() -> {
                         Card(
@@ -895,6 +925,25 @@ private fun LiveTickerDialog(
                             )
                         }
                     }
+                }
+
+                Text(
+                    text = buildAiStatusLine(aiStatus),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = tickerTextColor
+                )
+
+                val aiIssue = aiStatus?.error?.takeIf { it.isNotBlank() }
+                val issueLine = aiIssue ?: error?.takeIf { it.isNotBlank() }
+
+                if (!issueLine.isNullOrBlank()) {
+                    Text(
+                        text = "Issue: $issueLine",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
@@ -979,6 +1028,7 @@ private fun LiveTickerRow(event: LiveTickerEvent) {
 @Composable
 private fun LiveTickerNarrator(
     queue: List<LiveNarrationItem>,
+    isMuted: Boolean,
     onConsume: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -1014,7 +1064,7 @@ private fun LiveTickerNarrator(
         }
     }
 
-    LaunchedEffect(queue, isReady) {
+    LaunchedEffect(queue, isReady, isMuted) {
         if (!isReady) {
             return@LaunchedEffect
         }
@@ -1027,6 +1077,11 @@ private fun LiveTickerNarrator(
             return@LaunchedEffect
         }
 
+        if (isMuted) {
+            onConsume(nextItem.eventKey)
+            return@LaunchedEffect
+        }
+
         ttsState.value?.speak(
             text,
             TextToSpeech.QUEUE_ADD,
@@ -1035,6 +1090,22 @@ private fun LiveTickerNarrator(
         )
 
         onConsume(nextItem.eventKey)
+    }
+}
+
+private fun buildAiStatusLine(aiStatus: LiveTickerAiStatus?): String {
+    if (aiStatus == null) {
+        return "AI: UNKNOWN"
+    }
+
+    val modelSuffix = aiStatus.model?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+
+    return when (aiStatus.status.lowercase()) {
+        "active" -> "AI: ACTIVE$modelSuffix"
+        "fallback" -> "AI: FALLBACK$modelSuffix"
+        "missing-key" -> "AI: MISSING KEY"
+        "disabled" -> "AI: OFF"
+        else -> "AI: ${aiStatus.status.uppercase()}$modelSuffix"
     }
 }
 
