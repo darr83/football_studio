@@ -16,6 +16,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+data class LiveNarrationItem(
+    val eventKey: String,
+    val text: String
+)
+
 data class LiveScoresUiState(
     val isLoading: Boolean = true,
     val matches: List<ScoreMatch> = emptyList(),
@@ -32,7 +37,8 @@ data class LiveScoresUiState(
     val isLiveTickerOpen: Boolean = false,
     val isLiveTickerLoading: Boolean = false,
     val liveTickerEvents: List<LiveTickerEvent> = emptyList(),
-    val liveTickerError: String? = null
+    val liveTickerError: String? = null,
+    val pendingNarration: List<LiveNarrationItem> = emptyList()
 )
 
 class LiveScoreViewModel(
@@ -45,6 +51,7 @@ class LiveScoreViewModel(
     private val responseCache = mutableMapOf<String, ScoresResponse>()
     private val seenTickerEventKeys = LinkedHashSet<String>()
     private var liveTickerJob: Job? = null
+    private var isLiveTickerPrimed: Boolean = false
 
     private val _uiState = MutableStateFlow(
         LiveScoresUiState(
@@ -132,13 +139,15 @@ class LiveScoreViewModel(
 
     fun openLiveTicker() {
         seenTickerEventKeys.clear()
+        isLiveTickerPrimed = false
 
         _uiState.update {
             it.copy(
                 isLiveTickerOpen = true,
                 isLiveTickerLoading = true,
                 liveTickerEvents = emptyList(),
-                liveTickerError = null
+                liveTickerError = null,
+                pendingNarration = emptyList()
             )
         }
 
@@ -152,12 +161,24 @@ class LiveScoreViewModel(
     fun closeLiveTicker() {
         liveTickerJob?.cancel()
         liveTickerJob = null
+        isLiveTickerPrimed = false
 
         _uiState.update {
             it.copy(
                 isLiveTickerOpen = false,
                 isLiveTickerLoading = false,
-                liveTickerError = null
+                liveTickerError = null,
+                pendingNarration = emptyList()
+            )
+        }
+    }
+
+    fun consumeLiveNarration(eventKey: String) {
+        _uiState.update {
+            it.copy(
+                pendingNarration = it.pendingNarration.filterNot { item ->
+                    item.eventKey == eventKey
+                }
             )
         }
     }
@@ -198,12 +219,14 @@ class LiveScoreViewModel(
 
         if (_uiState.value.isLiveTickerOpen) {
             seenTickerEventKeys.clear()
+            isLiveTickerPrimed = false
 
             _uiState.update {
                 it.copy(
                     liveTickerEvents = emptyList(),
                     liveTickerError = null,
-                    isLiveTickerLoading = true
+                    isLiveTickerLoading = true,
+                    pendingNarration = emptyList()
                 )
             }
 
@@ -314,11 +337,35 @@ class LiveScoreViewModel(
                 }
 
                 val newEvents = response.events.filter { seenTickerEventKeys.add(it.eventKey) }
+                val narrationItems =
+                    if (isLiveTickerPrimed) {
+                        newEvents
+                            .asReversed()
+                            .mapNotNull { event ->
+                                val text = event.commentary?.trim().orEmpty().ifBlank {
+                                    event.message
+                                }
+
+                                text.takeIf { it.isNotBlank() }?.let {
+                                    LiveNarrationItem(
+                                        eventKey = event.eventKey,
+                                        text = it
+                                    )
+                                }
+                            }
+                    } else {
+                        emptyList()
+                    }
+
+                isLiveTickerPrimed = true
 
                 _uiState.update { current ->
                     val merged = (newEvents + current.liveTickerEvents)
                         .distinctBy { it.eventKey }
                         .take(MAX_TICKER_EVENTS)
+                    val narrationQueue = (current.pendingNarration + narrationItems)
+                        .distinctBy { it.eventKey }
+                        .takeLast(MAX_TICKER_NARRATION_ITEMS)
 
                     seenTickerEventKeys.clear()
                     seenTickerEventKeys.addAll(merged.map { it.eventKey })
@@ -326,7 +373,8 @@ class LiveScoreViewModel(
                     current.copy(
                         isLiveTickerLoading = false,
                         liveTickerEvents = merged,
-                        liveTickerError = response.error
+                        liveTickerError = response.error,
+                        pendingNarration = narrationQueue
                     )
                 }
             }
@@ -397,5 +445,6 @@ class LiveScoreViewModel(
         const val POLL_INTERVAL_MS = 20_000L
         const val TICKER_POLL_INTERVAL_MS = 12_000L
         const val MAX_TICKER_EVENTS = 120
+        const val MAX_TICKER_NARRATION_ITEMS = 30
     }
 }

@@ -1,5 +1,6 @@
 package com.footballstudio.livescore
 
+import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -41,9 +42,11 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -52,10 +55,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,6 +104,10 @@ private val redCardRowColor = Color(0xFFFFCDD2)
 private val redCardTextColor = Color(0xFF8B0000)
 private val liveMinuteBgColor = Color(0xFFC8E6C9)
 private val liveMinuteTextColor = Color(0xFF1B5E20)
+private val tickerPanelColor = Color(0xFFD8E7E7)
+private val tickerTextColor = Color(0xFF1E2A2A)
+private val tickerHighlightHome = Color(0xFF1B5E20)
+private val tickerHighlightAway = Color(0xFF0D47A1)
 
 private val competitionTabs = listOf(
     CompetitionTab(
@@ -190,7 +201,8 @@ class MainActivity : ComponentActivity() {
                         onMatchSelected = viewModel::selectMatchForDetails,
                         onDismissMatchDetails = viewModel::dismissMatchDetails,
                         onOpenLiveTicker = viewModel::openLiveTicker,
-                        onCloseLiveTicker = viewModel::closeLiveTicker
+                        onCloseLiveTicker = viewModel::closeLiveTicker,
+                        onConsumeLiveNarration = viewModel::consumeLiveNarration
                     )
                 }
             }
@@ -206,7 +218,8 @@ private fun LiveScoresScreen(
     onMatchSelected: (ScoreMatch) -> Unit,
     onDismissMatchDetails: () -> Unit,
     onOpenLiveTicker: () -> Unit,
-    onCloseLiveTicker: () -> Unit
+    onCloseLiveTicker: () -> Unit,
+    onConsumeLiveNarration: (String) -> Unit
 ) {
     val timelineTabs = buildTimelineTabs()
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
@@ -319,6 +332,11 @@ private fun LiveScoresScreen(
                 isLoading = state.isLiveTickerLoading,
                 error = state.liveTickerError,
                 onDismiss = onCloseLiveTicker
+            )
+
+            LiveTickerNarrator(
+                queue = state.pendingNarration,
+                onConsume = onConsumeLiveNarration
             )
         }
     }
@@ -801,13 +819,14 @@ private fun LiveTickerDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .fillMaxHeight(0.92f),
+            colors = CardDefaults.cardColors(containerColor = tickerPanelColor)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -815,24 +834,20 @@ private fun LiveTickerDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "LIVE Ticker",
-                        style = MaterialTheme.typography.titleLarge,
+                        text = "LIVE RESULTS TICKER",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = tickerTextColor
                     )
                     Text(
                         text = "Close",
-                        color = MaterialTheme.colorScheme.primary,
+                        color = tickerTextColor,
+                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable(onClick = onDismiss)
                     )
                 }
-
-                Text(
-                    text = "Goals, cards, penalties, half-time and full-time updates.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
 
                 when {
                     isLoading && events.isEmpty() -> {
@@ -865,7 +880,7 @@ private fun LiveTickerDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             items(events, key = { it.eventKey }) { event ->
                                 LiveTickerRow(event = event)
@@ -888,42 +903,196 @@ private fun LiveTickerDialog(
 
 @Composable
 private fun LiveTickerRow(event: LiveTickerEvent) {
-    val rowColor = when (event.teamSide) {
-        "home" -> MaterialTheme.colorScheme.primaryContainer
-        "away" -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val rowTextColor = when (event.teamSide) {
-        "home" -> MaterialTheme.colorScheme.onPrimaryContainer
-        "away" -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    val statusLabel = toTickerStatusLabel(event)
+    val minuteLabel = toTickerMinuteColumn(event)
+    val competitionCode = toTickerCompetitionCode(event.competitionName)
+    val textColor = tickerTextColor
+    val shouldHighlightScoringTeam = event.eventType == "goal" || event.eventType == "penalty"
+    val homeTeamColor =
+        if (shouldHighlightScoringTeam && event.teamSide == "home") tickerHighlightHome else textColor
+    val awayTeamColor =
+        if (shouldHighlightScoringTeam && event.teamSide == "away") tickerHighlightAway else textColor
+    val commentaryText = event.commentary?.trim().orEmpty().ifBlank {
+        toTickerEventSuffix(event)
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = rowColor)) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(tickerPanelColor)
+            .padding(horizontal = 4.dp, vertical = 3.dp)
+    ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            if (!event.minuteLabel.isNullOrBlank()) {
-                Text(
-                    text = event.minuteLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = rowTextColor
-                )
-            }
+            Text(
+                text = statusLabel,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = textColor,
+                modifier = Modifier.width(34.dp)
+            )
 
             Text(
-                text = event.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = rowTextColor,
-                fontWeight = FontWeight.SemiBold,
+                text = minuteLabel,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = textColor,
+                modifier = Modifier.width(46.dp)
+            )
+
+            Text(
+                text = competitionCode,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = textColor,
+                modifier = Modifier.width(36.dp)
+            )
+
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(style = SpanStyle(color = homeTeamColor)) {
+                        append(event.homeTeam.uppercase())
+                    }
+                    append(" ${event.homeScore ?: "-"} - ${event.awayScore ?: "-"} ")
+                    withStyle(style = SpanStyle(color = awayTeamColor)) {
+                        append(event.awayTeam.uppercase())
+                    }
+                    append(" - ")
+                    append(commentaryText)
+                },
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = textColor,
                 modifier = Modifier.weight(1f)
             )
         }
+    }
+}
+
+@Composable
+private fun LiveTickerNarrator(
+    queue: List<LiveNarrationItem>,
+    onConsume: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var isReady by remember { mutableStateOf(false) }
+    val ttsState = remember { mutableStateOf<TextToSpeech?>(null) }
+
+    DisposableEffect(context) {
+        val tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                isReady = true
+
+                val engine = ttsState.value
+                if (engine != null) {
+                    val languageResult = engine.setLanguage(Locale.UK)
+
+                    if (
+                        languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                        languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        engine.setLanguage(Locale.getDefault())
+                    }
+                }
+            }
+        }
+
+        ttsState.value = tts
+
+        onDispose {
+            tts.stop()
+            tts.shutdown()
+            ttsState.value = null
+            isReady = false
+        }
+    }
+
+    LaunchedEffect(queue, isReady) {
+        if (!isReady) {
+            return@LaunchedEffect
+        }
+
+        val nextItem = queue.firstOrNull() ?: return@LaunchedEffect
+        val text = nextItem.text.trim()
+
+        if (text.isBlank()) {
+            onConsume(nextItem.eventKey)
+            return@LaunchedEffect
+        }
+
+        ttsState.value?.speak(
+            text,
+            TextToSpeech.QUEUE_ADD,
+            null,
+            "live-commentary-${nextItem.eventKey}"
+        )
+
+        onConsume(nextItem.eventKey)
+    }
+}
+
+private fun toTickerStatusLabel(event: LiveTickerEvent): String {
+    return when (event.eventType) {
+        "goal" -> "GL"
+        "penalty" -> "PEN"
+        "yellow-card" -> "YC"
+        "red-card" -> "RC"
+        "half-time" -> "HT"
+        "full-time" -> "FT"
+        else -> "EVT"
+    }
+}
+
+private fun toTickerMinuteColumn(event: LiveTickerEvent): String {
+    val raw = event.minuteLabel?.trim().orEmpty()
+
+    if (raw.isBlank()) {
+        return "(-- )"
+    }
+
+    if (raw == "HT" || raw == "FT") {
+        return "(- -)"
+    }
+
+    val cleaned = raw.removeSuffix("'")
+    return "($cleaned)"
+}
+
+private fun toTickerCompetitionCode(competitionName: String): String {
+    return when (competitionName.lowercase()) {
+        "premier league" -> "EPL"
+        "championship" -> "CH"
+        "fa cup" -> "FAC"
+        "carabao cup" -> "EFL"
+        "champions league" -> "UCL"
+        "europa league" -> "UEL"
+        else -> competitionName
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .take(3)
+            .joinToString(separator = "") { it.first().uppercase() }
+            .ifBlank { "LGE" }
+    }
+}
+
+private fun toTickerEventSuffix(event: LiveTickerEvent): String {
+    val player = event.playerName?.takeIf { it.isNotBlank() }
+
+    return when (event.eventType) {
+        "goal" -> if (player != null) "GOAL $player" else "GOAL"
+        "penalty" -> if (player != null) "PENALTY GOAL $player" else "PENALTY GOAL"
+        "yellow-card" -> if (player != null) "YELLOW CARD $player" else "YELLOW CARD"
+        "red-card" -> if (player != null) "RED CARD $player" else "RED CARD"
+        "half-time" -> "HALF TIME"
+        "full-time" -> "FULL TIME"
+        else -> event.message
     }
 }
 

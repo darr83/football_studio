@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { withAiCommentary } from "./aiCommentary.js";
 import { config } from "./config.js";
 import { getDateWindowState, getState, onUpdate, startScheduler } from "./cacheStore.js";
 import { fetchLiveTickerEvents, fetchMatchDetails, fetchMatchesForDate } from "./sportsApi.js";
@@ -371,10 +372,12 @@ app.get("/api/live-feed", async (req, res) => {
       merged.set(event.eventKey, event);
     }
 
+    const eventsWithCommentary = await withAiCommentary(Array.from(merged.values()));
+
     return res.json({
       source: "sports-api-live-feed",
       lastUpdatedUtc: new Date().toISOString(),
-      events: Array.from(merged.values()),
+      events: eventsWithCommentary,
       error: null
     });
   } catch (error) {
