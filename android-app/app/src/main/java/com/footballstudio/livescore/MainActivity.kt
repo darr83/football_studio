@@ -1,16 +1,26 @@
 package com.footballstudio.livescore
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.media.AudioAttributes
 import android.os.Build
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -143,6 +153,24 @@ private data class TickerEventPalette(
     val commentaryText: Color
 )
 
+private data class LivePresentationMatchCard(
+    val key: String,
+    val competitionName: String,
+    val homeTeam: String,
+    val awayTeam: String,
+    val homeScore: Int?,
+    val awayScore: Int?,
+    val minuteLabel: String?,
+    val homeBadgeUrl: String?,
+    val awayBadgeUrl: String?,
+    val homeScorers: List<String>,
+    val awayScorers: List<String>,
+    val homeCards: List<String>,
+    val awayCards: List<String>,
+    val homeSubs: List<String>,
+    val awaySubs: List<String>
+)
+
 private val competitionTabs = listOf(
     CompetitionTab(
         title = "Premier League",
@@ -224,6 +252,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyImmersiveMode()
 
         setContent {
             FootballLiveTheme {
@@ -243,6 +272,23 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+
+        if (hasFocus) {
+            applyImmersiveMode()
+        }
+    }
+
+    private fun applyImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
 }
 
 @Composable
@@ -257,6 +303,8 @@ private fun LiveScoresScreen(
     onConsumeLiveNarration: (String) -> Unit,
     onSetLiveAudioMuted: (Boolean) -> Unit
 ) {
+    KeepScreenOnWhen(enabled = state.isLiveTickerOpen)
+
     val timelineTabs = buildTimelineTabs()
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
     val todayLiveDefaultIndex = timelineTabs.indexOfFirst { it.mode == "today-live" }.coerceAtLeast(0)
@@ -271,6 +319,28 @@ private fun LiveScoresScreen(
             selectedTimeline.mode,
             selectedTimeline.dateIso
         )
+    }
+
+    if (state.isLiveTickerOpen) {
+        LiveTickerPresentationScreen(
+            events = state.liveTickerEvents,
+            liveMatches = state.liveTickerLiveMatches,
+            tomorrowFixtures = state.liveTickerTomorrowFixtures,
+            isLoading = state.isLiveTickerLoading,
+            error = state.liveTickerError,
+            aiStatus = state.liveTickerAiStatus,
+            isAudioMuted = state.isLiveAudioMuted,
+            onToggleMute = { onSetLiveAudioMuted(!state.isLiveAudioMuted) },
+            onClose = onCloseLiveTicker
+        )
+
+        LiveTickerNarrator(
+            queue = state.pendingNarration,
+            isMuted = state.isLiveAudioMuted,
+            onConsume = onConsumeLiveNarration
+        )
+
+        return
     }
 
     Scaffold(
@@ -361,23 +431,24 @@ private fun LiveScoresScreen(
                 onDismiss = onDismissMatchDetails
             )
         }
+    }
+}
 
-        if (state.isLiveTickerOpen) {
-            LiveTickerDialog(
-                events = state.liveTickerEvents,
-                isLoading = state.isLiveTickerLoading,
-                error = state.liveTickerError,
-                aiStatus = state.liveTickerAiStatus,
-                isAudioMuted = state.isLiveAudioMuted,
-                onToggleMute = { onSetLiveAudioMuted(!state.isLiveAudioMuted) },
-                onDismiss = onCloseLiveTicker
-            )
+@Composable
+private fun KeepScreenOnWhen(enabled: Boolean) {
+    val context = LocalContext.current
 
-            LiveTickerNarrator(
-                queue = state.pendingNarration,
-                isMuted = state.isLiveAudioMuted,
-                onConsume = onConsumeLiveNarration
-            )
+    DisposableEffect(context, enabled) {
+        val activity = context.findActivity()
+
+        if (enabled) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 }
@@ -845,6 +916,646 @@ private fun MatchDetailsDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun LiveTickerPresentationScreen(
+    events: List<LiveTickerEvent>,
+    liveMatches: List<ScoreMatch>,
+    tomorrowFixtures: List<ScoreMatch>,
+    isLoading: Boolean,
+    error: String?,
+    aiStatus: LiveTickerAiStatus?,
+    isAudioMuted: Boolean,
+    onToggleMute: () -> Unit,
+    onClose: () -> Unit
+) {
+    ForceLandscapeOrientation()
+
+    var liveClockLabel by remember { mutableStateOf(currentTickerClockLabel()) }
+    val cards = remember(events, liveMatches) {
+        buildLivePresentationCards(events = events, liveMatches = liveMatches)
+    }
+    var selectedCardIndex by remember(cards) { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            liveClockLabel = currentTickerClockLabel()
+            delay(1_000)
+        }
+    }
+
+    LaunchedEffect(cards.size) {
+        if (selectedCardIndex >= cards.size) {
+            selectedCardIndex = 0
+        }
+    }
+
+    LaunchedEffect(cards) {
+        if (cards.size <= 1) {
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            delay(7_500)
+            selectedCardIndex = (selectedCardIndex + 1) % cards.size
+        }
+    }
+
+    val selectedCard = cards.getOrNull(selectedCardIndex)
+    val bottomTickerText = remember(cards, tomorrowFixtures) {
+        buildLiveBottomTickerText(cards = cards, tomorrowFixtures = tomorrowFixtures)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B1F5E))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(Color.White, RoundedCornerShape(8.dp))
+                        .clickable(onClick = onClose)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "Close",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0B1F5E)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .background(
+                            color = if (isAudioMuted) Color(0xFF5E4630) else Color(0xFF1B5E20),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable(onClick = onToggleMute)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (isAudioMuted) "Audio Muted" else "Audio Live",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "Football STUDIO LIVE",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    fontSize = 22.sp
+                )
+                Text(
+                    text = liveClockLabel,
+                    color = Color(0xFFE2E8FF),
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF152E7A))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (cards.isEmpty()) "No Live Games" else "Live Games",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    if (isLoading && cards.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color.White)
+                        }
+                    } else if (cards.isEmpty()) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "No live events right now.",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            if (tomorrowFixtures.isNotEmpty()) {
+                                Text(
+                                    text = "Tomorrow Fixtures",
+                                    color = Color(0xFFFFF59D),
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(tomorrowFixtures, key = { "${it.id}-${it.kickoffUtc}-${it.homeTeam}-${it.awayTeam}" }) { fixture ->
+                                        Text(
+                                            text = "${fixture.leagueName}: ${fixture.homeTeam} vs ${fixture.awayTeam} (${formatKickoffTime(fixture.kickoffUtc)})",
+                                            color = Color(0xFFE3EAFF),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(cards, key = { it.key }) { card ->
+                                val itemIndex = cards.indexOfFirst { it.key == card.key }
+                                val isSelected = itemIndex == selectedCardIndex
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedCardIndex = itemIndex.coerceAtLeast(0)
+                                        },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) Color(0xFF213D99) else Color(0xFF1A327F)
+                                    ),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) Color(0xFFFFE082) else Color(0xFF3B58A9)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = card.competitionName,
+                                                color = Color(0xFFC9D5FF),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
+                                            Text(
+                                                text = "${card.homeTeam} ${card.homeScore ?: "-"}-${card.awayScore ?: "-"} ${card.awayTeam}",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1
+                                            )
+                                        }
+
+                                        Text(
+                                            text = toPresentationMinute(card.minuteLabel),
+                                            color = Color(0xFFFFF59D),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier
+                    .weight(1.45f)
+                    .fillMaxHeight(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0E2A72))
+            ) {
+                if (selectedCard == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isLoading) "Loading live presentation..." else "Waiting for live matches",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    LivePresentationMainMatchCard(card = selectedCard)
+                }
+            }
+        }
+
+        if (!error.isNullOrBlank()) {
+            Text(
+                text = "Issue: $error",
+                color = Color(0xFFFFCDD2),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Text(
+            text = buildAiStatusLine(aiStatus),
+            color = Color(0xFFE2E8FF),
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFFFF59D), RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = bottomTickerText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee(iterations = Int.MAX_VALUE),
+                maxLines = 1,
+                color = Color(0xFF10244D),
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = card.competitionName,
+            color = Color(0xFFC9D5FF),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                TeamBadge(badgeUrl = card.homeBadgeUrl, size = 44.dp)
+                Text(
+                    text = card.homeTeam,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${card.homeScore ?: "-"} - ${card.awayScore ?: "-"}",
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 34.sp
+                )
+                Text(
+                    text = toPresentationMinute(card.minuteLabel),
+                    color = Color(0xFFFFF59D),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                TeamBadge(badgeUrl = card.awayBadgeUrl, size = 44.dp)
+                Text(
+                    text = card.awayTeam,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            LivePresentationTeamFacts(
+                title = card.homeTeam,
+                scorers = card.homeScorers,
+                cards = card.homeCards,
+                substitutions = card.homeSubs,
+                modifier = Modifier.weight(1f)
+            )
+            LivePresentationTeamFacts(
+                title = card.awayTeam,
+                scorers = card.awayScorers,
+                cards = card.awayCards,
+                substitutions = card.awaySubs,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LivePresentationTeamFacts(
+    title: String,
+    scorers: List<String>,
+    cards: List<String>,
+    substitutions: List<String>,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A3A8E)),
+        border = BorderStroke(1.dp, Color(0xFF3A57A4))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = title,
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+
+            LiveFactSection(label = "Scorers", items = scorers)
+            LiveFactSection(label = "Cards", items = cards)
+            LiveFactSection(label = "Subs", items = substitutions)
+        }
+    }
+}
+
+@Composable
+private fun LiveFactSection(
+    label: String,
+    items: List<String>
+) {
+    Text(
+        text = label,
+        color = Color(0xFFFFF59D),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold
+    )
+
+    if (items.isEmpty()) {
+        Text(
+            text = "-",
+            color = Color(0xFFE3EAFF),
+            style = MaterialTheme.typography.bodySmall
+        )
+    } else {
+        items.take(6).forEach { item ->
+            Text(
+                text = item,
+                color = Color(0xFFE3EAFF),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun ForceLandscapeOrientation() {
+    val context = LocalContext.current
+
+    DisposableEffect(context) {
+        val activity = context.findActivity()
+        val previousOrientation = activity?.requestedOrientation
+
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
+        onDispose {
+            if (activity != null && previousOrientation != null) {
+                activity.requestedOrientation = previousOrientation
+            }
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+
+    while (current is ContextWrapper) {
+        if (current is Activity) {
+            return current
+        }
+
+        current = current.baseContext
+    }
+
+    return null
+}
+
+private fun buildLivePresentationCards(
+    events: List<LiveTickerEvent>,
+    liveMatches: List<ScoreMatch>
+): List<LivePresentationMatchCard> {
+    val cards = linkedMapOf<String, LivePresentationMatchCard>()
+
+    fun keyOf(competitionName: String, homeTeam: String, awayTeam: String): String {
+        return "${competitionName.lowercase()}|${homeTeam.lowercase()}|${awayTeam.lowercase()}"
+    }
+
+    liveMatches.forEach { match ->
+        val key = keyOf(match.leagueName, match.homeTeam, match.awayTeam)
+        cards[key] = LivePresentationMatchCard(
+            key = key,
+            competitionName = match.leagueName,
+            homeTeam = match.homeTeam,
+            awayTeam = match.awayTeam,
+            homeScore = match.homeScore,
+            awayScore = match.awayScore,
+            minuteLabel = match.minute?.let { "$it'" },
+            homeBadgeUrl = match.homeTeamBadgeUrl,
+            awayBadgeUrl = match.awayTeamBadgeUrl,
+            homeScorers = match.homeScorers.map { "${it.player} ${it.minuteLabel}".trim() },
+            awayScorers = match.awayScorers.map { "${it.player} ${it.minuteLabel}".trim() },
+            homeCards = emptyList(),
+            awayCards = emptyList(),
+            homeSubs = emptyList(),
+            awaySubs = emptyList()
+        )
+    }
+
+    events.forEach { event ->
+        val key = keyOf(event.competitionName, event.homeTeam, event.awayTeam)
+        val existing = cards[key]
+
+        val homeScorers = existing?.homeScorers?.toMutableList() ?: mutableListOf()
+        val awayScorers = existing?.awayScorers?.toMutableList() ?: mutableListOf()
+        val homeCards = existing?.homeCards?.toMutableList() ?: mutableListOf()
+        val awayCards = existing?.awayCards?.toMutableList() ?: mutableListOf()
+        val homeSubs = existing?.homeSubs?.toMutableList() ?: mutableListOf()
+        val awaySubs = existing?.awaySubs?.toMutableList() ?: mutableListOf()
+
+        val minuteText = event.minuteLabel?.takeIf { it.isNotBlank() }?.let { " (${it.trim()})" }.orEmpty()
+        val playerName = event.playerName?.takeIf { it.isNotBlank() }
+        val playerOut = event.playerOutName?.takeIf { it.isNotBlank() }
+
+        when (event.eventType) {
+            "goal", "penalty" -> {
+                val item = playerName?.let { "$it$minuteText" } ?: "Goal$minuteText"
+                if (event.teamSide == "away") {
+                    addUnique(awayScorers, item)
+                } else {
+                    addUnique(homeScorers, item)
+                }
+            }
+            "yellow-card" -> {
+                val item = (playerName ?: "Yellow card") + minuteText
+                if (event.teamSide == "away") {
+                    addUnique(awayCards, "YC $item")
+                } else {
+                    addUnique(homeCards, "YC $item")
+                }
+            }
+            "red-card" -> {
+                val item = (playerName ?: "Red card") + minuteText
+                if (event.teamSide == "away") {
+                    addUnique(awayCards, "RC $item")
+                } else {
+                    addUnique(homeCards, "RC $item")
+                }
+            }
+            "substitution" -> {
+                val subText =
+                    when {
+                        playerName != null && playerOut != null -> "$playerName for $playerOut$minuteText"
+                        playerName != null -> "$playerName on$minuteText"
+                        else -> "Substitution$minuteText"
+                    }
+
+                if (event.teamSide == "away") {
+                    addUnique(awaySubs, subText)
+                } else {
+                    addUnique(homeSubs, subText)
+                }
+            }
+        }
+
+        cards[key] = LivePresentationMatchCard(
+            key = key,
+            competitionName = existing?.competitionName ?: event.competitionName,
+            homeTeam = existing?.homeTeam ?: event.homeTeam,
+            awayTeam = existing?.awayTeam ?: event.awayTeam,
+            homeScore = event.homeScore ?: existing?.homeScore,
+            awayScore = event.awayScore ?: existing?.awayScore,
+            minuteLabel = event.minuteLabel ?: existing?.minuteLabel,
+            homeBadgeUrl = existing?.homeBadgeUrl,
+            awayBadgeUrl = existing?.awayBadgeUrl,
+            homeScorers = homeScorers,
+            awayScorers = awayScorers,
+            homeCards = homeCards,
+            awayCards = awayCards,
+            homeSubs = homeSubs,
+            awaySubs = awaySubs
+        )
+    }
+
+    return cards.values
+        .sortedWith(compareBy<LivePresentationMatchCard> { it.competitionName.lowercase() }.thenBy { it.homeTeam.lowercase() })
+}
+
+private fun buildLiveBottomTickerText(
+    cards: List<LivePresentationMatchCard>,
+    tomorrowFixtures: List<ScoreMatch>
+): String {
+    if (cards.isNotEmpty()) {
+        return cards.joinToString("   •   ") { card ->
+            "${card.competitionName.uppercase(Locale.ROOT)} ${card.homeTeam} ${card.homeScore ?: "-"} ${card.awayTeam} ${card.awayScore ?: "-"} (${toPresentationMinute(card.minuteLabel)})"
+        }
+    }
+
+    if (tomorrowFixtures.isNotEmpty()) {
+        val grouped = tomorrowFixtures.groupBy { it.leagueName }
+
+        return grouped.entries.joinToString("   •   ") { (league, fixtures) ->
+            val fixturesText = fixtures.joinToString(" | ") { fixture ->
+                "${fixture.homeTeam} v ${fixture.awayTeam} ${formatKickoffTime(fixture.kickoffUtc)}"
+            }
+
+            "${league.uppercase(Locale.ROOT)}: $fixturesText"
+        }
+    }
+
+    return "NO LIVE GAMES RIGHT NOW. CHECK BACK SOON FOR LIVE SCORES."
+}
+
+private fun toPresentationMinute(minuteLabel: String?): String {
+    val raw = minuteLabel?.trim().orEmpty()
+
+    if (raw.isBlank()) {
+        return "-- mins"
+    }
+
+    if (raw.equals("HT", ignoreCase = true) || raw.equals("FT", ignoreCase = true)) {
+        return raw.uppercase(Locale.ROOT)
+    }
+
+    return raw.removeSuffix("'") + " mins"
+}
+
+private fun addUnique(items: MutableList<String>, value: String) {
+    val normalized = value.trim()
+
+    if (normalized.isBlank()) {
+        return
+    }
+
+    if (!items.contains(normalized)) {
+        items += normalized
     }
 }
 

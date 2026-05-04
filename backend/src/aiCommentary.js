@@ -39,22 +39,39 @@ const stripInitialDotPlayerNames = (value) => {
   return String(value ?? "").replace(/\b[A-Za-z]\.([A-Za-z][\p{L}'-]*)\b/gu, "$1");
 };
 
+const toScoreToken = (score) => {
+  if (score === 0) {
+    return "nil";
+  }
+
+  return Number.isFinite(Number(score)) ? String(score) : "unknown";
+};
+
+const formatScorelineForCommentary = ({ homeTeam, awayTeam, homeScore, awayScore }) => {
+  return `${homeTeam} ${toScoreToken(homeScore)} ${awayTeam} ${toScoreToken(awayScore)}`;
+};
+
 const fallbackCommentary = (event) => {
   const homeTeam = toSafeString(event?.homeTeam) || "Home";
   const awayTeam = toSafeString(event?.awayTeam) || "Away";
-  const score = `${event?.homeScore ?? "-"}-${event?.awayScore ?? "-"}`;
+  const scoreline = formatScorelineForCommentary({
+    homeTeam,
+    awayTeam,
+    homeScore: event?.homeScore,
+    awayScore: event?.awayScore
+  });
   const player = toSafeString(event?.playerName);
   const playerOut = toSafeString(event?.playerOutName);
 
   switch (event?.eventType) {
     case "goal":
       return player
-        ? `${homeTeam} ${score} ${awayTeam}. Goal scored by ${player}.`
-        : `${homeTeam} ${score} ${awayTeam}. Goal scored.`;
+        ? `${scoreline}. Goal scored by ${player}.`
+        : `${scoreline}. Goal scored.`;
     case "penalty":
       return player
-        ? `${homeTeam} ${score} ${awayTeam}. Penalty converted by ${player}.`
-        : `${homeTeam} ${score} ${awayTeam}. Penalty goal.`;
+        ? `${scoreline}. Penalty converted by ${player}.`
+        : `${scoreline}. Penalty goal.`;
     case "yellow-card":
       return player ? `Yellow card shown to ${player}.` : "Yellow card shown.";
     case "red-card":
@@ -66,11 +83,11 @@ const fallbackCommentary = (event) => {
           ? `Substitution: ${player} comes on.`
           : "Substitution made.";
     case "half-time":
-      return `Half-time: ${homeTeam} ${score} ${awayTeam}.`;
+      return `Half-time: ${scoreline}.`;
     case "full-time":
-      return `Full-time: ${homeTeam} ${score} ${awayTeam}.`;
+      return `Full-time: ${scoreline}.`;
     default:
-      return toSafeString(event?.message) || `${homeTeam} ${score} ${awayTeam}.`;
+      return toSafeString(event?.message) || `${scoreline}.`;
   }
 };
 
@@ -113,7 +130,12 @@ const formatMatchLabel = (match) => {
     return `${homeTeam} versus ${awayTeam}`;
   }
 
-  return `${homeTeam} ${homeScore}-${awayScore} ${awayTeam}`;
+  return formatScorelineForCommentary({
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore
+  });
 };
 
 const fallbackWelcomeCommentary = ({
@@ -208,6 +230,7 @@ const generateAiCommentaryMap = async (events) => {
   const payloadEvents = buildPromptEvents(events);
   const systemPrompt =
     "You are a football live commentator. Write one concise, energetic sentence per event. " +
+    "Format score mentions as: HomeTeam score AwayTeam score. Use nil for zero. " +
     "Use player surnames only, not initials or full names. " +
     "Keep each line under 18 words, no hashtags, no emojis, no markdown.";
   const userPrompt =

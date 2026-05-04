@@ -410,9 +410,17 @@ const toTickerMessage = ({
   eventLabel,
   playerName = null
 }) => {
-  const score = `${homeScore ?? "-"} - ${awayScore ?? "-"}`;
+  const scoreToken = (value) => {
+    if (value === 0) {
+      return "nil";
+    }
+
+    return Number.isFinite(Number(value)) ? String(value) : "unknown";
+  };
+
+  const scoreline = `${homeTeam} ${scoreToken(homeScore)} ${awayTeam} ${scoreToken(awayScore)}`;
   const suffix = playerName ? ` ${playerName}` : "";
-  return `${leagueName} - ${homeTeam} ${score} ${awayTeam} - ${eventLabel}${suffix}`;
+  return `${leagueName} - ${scoreline} - ${eventLabel}${suffix}`;
 };
 
 const normalizeTickerIncident = (event, incident) => {
