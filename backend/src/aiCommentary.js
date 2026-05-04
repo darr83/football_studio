@@ -35,6 +35,10 @@ const toSafeString = (value) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
+const stripInitialDotPlayerNames = (value) => {
+  return String(value ?? "").replace(/\b[A-Za-z]\.([A-Za-z][\p{L}'-]*)\b/gu, "$1");
+};
+
 const fallbackCommentary = (event) => {
   const homeTeam = toSafeString(event?.homeTeam) || "Home";
   const awayTeam = toSafeString(event?.awayTeam) || "Away";
@@ -71,7 +75,7 @@ const fallbackCommentary = (event) => {
 };
 
 const normalizeCommentary = (value, fallback) => {
-  const cleaned = toSafeString(value).replace(/\s+/g, " ");
+  const cleaned = stripInitialDotPlayerNames(toSafeString(value)).replace(/\s+/g, " ");
 
   if (!cleaned) {
     return fallback;
@@ -204,6 +208,7 @@ const generateAiCommentaryMap = async (events) => {
   const payloadEvents = buildPromptEvents(events);
   const systemPrompt =
     "You are a football live commentator. Write one concise, energetic sentence per event. " +
+    "Use player surnames only, not initials or full names. " +
     "Keep each line under 18 words, no hashtags, no emojis, no markdown.";
   const userPrompt =
     "Return only a JSON object mapping each eventKey to commentary text. " +

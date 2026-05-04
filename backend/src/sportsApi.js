@@ -150,6 +150,59 @@ const toCoachName = (value) => {
   return null;
 };
 
+const SURNAME_JOINERS = new Set([
+  "da",
+  "de",
+  "del",
+  "della",
+  "di",
+  "dos",
+  "du",
+  "la",
+  "le",
+  "van",
+  "von"
+]);
+
+const toSurname = (value) => {
+  const raw = String(value ?? "").trim().replace(/\s+/g, " ");
+
+  if (!raw) {
+    return "Unknown";
+  }
+
+  const initialDotMatch = raw.match(/^[A-Za-z]\.[\s]*([A-Za-z][\p{L}\-']*)$/u);
+  if (initialDotMatch) {
+    return initialDotMatch[1];
+  }
+
+  const tokens = raw.split(" ").filter((token) => token.trim().length > 0);
+
+  if (tokens.length <= 1) {
+    return raw;
+  }
+
+  while (
+    tokens.length > 1 &&
+    /^([A-Za-z]\.?){1,2}$/u.test(tokens[0])
+  ) {
+    tokens.shift();
+  }
+
+  if (tokens.length <= 1) {
+    return tokens[0] ?? raw;
+  }
+
+  const last = tokens[tokens.length - 1];
+  const previous = tokens[tokens.length - 2];
+
+  if (SURNAME_JOINERS.has(previous.toLowerCase())) {
+    return `${previous} ${last}`;
+  }
+
+  return last;
+};
+
 const pickFirstNumber = (obj, keys) => {
   for (const key of keys) {
     const parsed = toNumber(obj?.[key]);
@@ -167,7 +220,7 @@ const normalizePlayer = (player) => {
   const positionRaw = player?.position ?? player?.specific_position;
 
   return {
-    name: String(player?.name ?? "Unknown"),
+    name: toSurname(player?.name),
     jerseyNumber: jerseyRaw !== null && jerseyRaw !== undefined ? String(jerseyRaw) : null,
     position: positionRaw ? String(positionRaw) : null,
     subOutMinute: toNumber(player?.sub_out),
@@ -180,7 +233,7 @@ const normalizeSubstitution = (substitute, playersById) => {
   const replacedPlayerId = toNumber(substitute?.replaces_player_id);
 
   return {
-    name: String(substitute?.name ?? "Unknown"),
+    name: toSurname(substitute?.name),
     minuteIn: toNumber(substitute?.sub_in),
     replacedPlayerName:
       replacedPlayerId !== null ? playersById.get(replacedPlayerId) ?? null : null,
@@ -194,7 +247,7 @@ const normalizeTeamLineup = ({ lineup, fallbackCoach }) => {
   const substitutesRaw = Array.isArray(lineup?.substitutes) ? lineup.substitutes : [];
   const playersById = new Map(
     playersRaw
-      .map((player) => [toNumber(player?.player_id), String(player?.name ?? "Unknown")])
+      .map((player) => [toNumber(player?.player_id), toSurname(player?.name)])
       .filter(([playerId]) => playerId !== null)
   );
 
@@ -247,7 +300,7 @@ const extractGoalScorers = (event) => {
     }
 
     const scorer = {
-      player: String(incident?.player ?? "Unknown"),
+      player: toSurname(incident?.player),
       minuteLabel: toMinuteLabel(incident),
       sortOrder: toMinuteSort(incident)
     };
@@ -369,7 +422,7 @@ const normalizeTickerIncident = (event, incident) => {
   const awayTeam = normalizeTeamName(event, "away");
   const homeScore = event?.home_score ?? incident?.home_score ?? null;
   const awayScore = event?.away_score ?? incident?.away_score ?? null;
-  const playerName = incident?.player ? String(incident.player) : null;
+  const playerName = incident?.player ? toSurname(incident.player) : null;
   const minuteLabel = toMinuteLabel(incident);
   const teamSide =
     incident?.is_home === true ? "home" : incident?.is_home === false ? "away" : null;
@@ -488,8 +541,8 @@ const normalizeTickerIncident = (event, incident) => {
   }
 
   if (incidentType === "substitution") {
-    const playerIn = incident?.player_in ? String(incident.player_in) : null;
-    const playerOut = incident?.player_out ? String(incident.player_out) : null;
+    const playerIn = incident?.player_in ? toSurname(incident.player_in) : null;
+    const playerOut = incident?.player_out ? toSurname(incident.player_out) : null;
     const substitutionDetail =
       playerIn && playerOut
         ? `${playerIn} for ${playerOut}`

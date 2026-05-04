@@ -1,6 +1,9 @@
 package com.footballstudio.livescore
 
+import android.media.AudioAttributes
+import android.os.Build
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -79,6 +82,7 @@ import com.footballstudio.livescore.data.ScoreMatch
 import com.footballstudio.livescore.data.SubstitutionItem
 import com.footballstudio.livescore.data.TeamLineup
 import com.footballstudio.livescore.ui.theme.FootballLiveTheme
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -109,6 +113,35 @@ private val tickerPanelColor = Color(0xFFD8E7E7)
 private val tickerTextColor = Color(0xFF1E2A2A)
 private val tickerHighlightHome = Color(0xFF1B5E20)
 private val tickerHighlightAway = Color(0xFF0D47A1)
+private const val LIVE_NARRATION_RATE = 0.95f
+private const val LIVE_NARRATION_PITCH = 1.0f
+private const val PREFER_AI_TTS_VOICE = true
+private val initialDotNameRegex = Regex("\\b[A-Za-z]\\.([A-Za-z][\\p{L}'-]*)\\b")
+private val leadingInitialNameRegex = Regex("^[A-Za-z]\\.\\s*([A-Za-z][\\p{L}'-]*)$")
+private val initialTokenRegex = Regex("^([A-Za-z]\\.?|([A-Za-z]\\.){2})$")
+private val surnameJoiners = setOf(
+    "da",
+    "de",
+    "del",
+    "della",
+    "di",
+    "dos",
+    "du",
+    "la",
+    "le",
+    "van",
+    "von"
+)
+
+private data class TickerEventPalette(
+    val border: Color,
+    val badgeBackground: Color,
+    val badgeText: Color,
+    val scoreColor: Color,
+    val commentaryBackground: Color,
+    val commentaryBorder: Color,
+    val commentaryText: Color
+)
 
 private val competitionTabs = listOf(
     CompetitionTab(
@@ -825,6 +858,15 @@ private fun LiveTickerDialog(
     onToggleMute: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var liveClockLabel by remember { mutableStateOf(currentTickerClockLabel()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            liveClockLabel = currentTickerClockLabel()
+            delay(1_000)
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
@@ -844,10 +886,9 @@ private fun LiveTickerDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "LIVE RESULTS TICKER",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.ExtraBold,
+                        text = "Live Ticker",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
                         color = tickerTextColor
                     )
                     Row(
@@ -857,15 +898,15 @@ private fun LiveTickerDialog(
                         Text(
                             text = if (isAudioMuted) "Unmute" else "Mute",
                             color = tickerTextColor,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
                             modifier = Modifier.clickable(onClick = onToggleMute)
                         )
                         Text(
                             text = "Close",
                             color = tickerTextColor,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
                             modifier = Modifier.clickable(onClick = onDismiss)
                         )
                     }
@@ -873,10 +914,9 @@ private fun LiveTickerDialog(
 
                 Text(
                     text = if (isAudioMuted) "Audio: MUTED" else "Audio: LIVE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = tickerTextColor
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 when {
@@ -910,7 +950,7 @@ private fun LiveTickerDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(events, key = { it.eventKey }) { event ->
                                 LiveTickerRow(event = event)
@@ -945,83 +985,265 @@ private fun LiveTickerDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = liveClockLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
 }
 
+private fun currentTickerClockLabel(): String {
+    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+}
+
 @Composable
 private fun LiveTickerRow(event: LiveTickerEvent) {
-    val statusLabel = toTickerStatusLabel(event)
-    val minuteLabel = toTickerMinuteColumn(event)
-    val competitionCode = toTickerCompetitionCode(event.competitionName)
-    val textColor = tickerTextColor
+    val eventLabel = toTickerEventLabel(event)
+    val minuteLabel = toTickerMinuteLabel(event)
+    val palette = tickerEventPalette(event)
+    val textColor = MaterialTheme.colorScheme.onSurface
     val shouldHighlightScoringTeam = event.eventType == "goal" || event.eventType == "penalty"
     val homeTeamColor =
         if (shouldHighlightScoringTeam && event.teamSide == "home") tickerHighlightHome else textColor
     val awayTeamColor =
         if (shouldHighlightScoringTeam && event.teamSide == "away") tickerHighlightAway else textColor
-    val commentaryText = event.commentary?.trim().orEmpty().ifBlank {
-        toTickerEventSuffix(event)
+    val commentaryText = stripInitialDotPlayerNames(
+        event.commentary?.trim().orEmpty().ifBlank {
+            toTickerEventSuffix(event)
+        }
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, palette.border),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = event.competitionName,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = palette.badgeBackground,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = eventLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.badgeText
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = minuteLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = event.homeTeam,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    color = homeTeamColor
+                )
+
+                Text(
+                    text = "${event.homeScore ?: "-"} - ${event.awayScore ?: "-"}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = palette.scoreColor
+                )
+
+                Text(
+                    text = event.awayTeam,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    textAlign = TextAlign.End,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    color = awayTeamColor
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = palette.commentaryBackground,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .border(
+                        border = BorderStroke(1.dp, palette.commentaryBorder),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = commentaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.commentaryText,
+                    maxLines = 3
+                )
+            }
+        }
+    }
+}
+
+private fun toTickerEventLabel(event: LiveTickerEvent): String {
+    return when (event.eventType) {
+        "goal" -> "GOAL"
+        "penalty" -> "PENALTY"
+        "substitution" -> "SUB"
+        "yellow-card" -> "YELLOW"
+        "red-card" -> "RED"
+        "half-time" -> "HT"
+        "full-time" -> "FT"
+        else -> "EVENT"
+    }
+}
+
+private fun toTickerMinuteLabel(event: LiveTickerEvent): String {
+    val raw = event.minuteLabel?.trim().orEmpty()
+
+    if (raw.isNotBlank()) {
+        return raw
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(tickerPanelColor)
-            .padding(horizontal = 4.dp, vertical = 3.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Text(
-                text = statusLabel,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = textColor,
-                modifier = Modifier.width(34.dp)
-            )
+    return when (event.eventType) {
+        "half-time" -> "HT"
+        "full-time" -> "FT"
+        else -> "--"
+    }
+}
 
-            Text(
-                text = minuteLabel,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = textColor,
-                modifier = Modifier.width(46.dp)
-            )
-
-            Text(
-                text = competitionCode,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = textColor,
-                modifier = Modifier.width(36.dp)
-            )
-
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(style = SpanStyle(color = homeTeamColor)) {
-                        append(event.homeTeam.uppercase())
-                    }
-                    append(" ${event.homeScore ?: "-"} - ${event.awayScore ?: "-"} ")
-                    withStyle(style = SpanStyle(color = awayTeamColor)) {
-                        append(event.awayTeam.uppercase())
-                    }
-                    append(" - ")
-                    append(commentaryText)
-                },
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = textColor,
-                modifier = Modifier.weight(1f)
-            )
-        }
+private fun tickerEventPalette(event: LiveTickerEvent): TickerEventPalette {
+    return when (event.eventType) {
+        "goal" -> TickerEventPalette(
+            border = Color(0xFF2E7D32),
+            badgeBackground = Color(0xFF2E7D32),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF1B5E20),
+            commentaryBackground = Color(0xFFE8F5E9),
+            commentaryBorder = Color(0xFFA5D6A7),
+            commentaryText = Color(0xFF1B5E20)
+        )
+        "penalty" -> TickerEventPalette(
+            border = Color(0xFF1565C0),
+            badgeBackground = Color(0xFF1565C0),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF0D47A1),
+            commentaryBackground = Color(0xFFE3F2FD),
+            commentaryBorder = Color(0xFF90CAF9),
+            commentaryText = Color(0xFF0D47A1)
+        )
+        "substitution" -> TickerEventPalette(
+            border = Color(0xFF00695C),
+            badgeBackground = Color(0xFF00695C),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF004D40),
+            commentaryBackground = Color(0xFFE0F2F1),
+            commentaryBorder = Color(0xFF80CBC4),
+            commentaryText = Color(0xFF004D40)
+        )
+        "yellow-card" -> TickerEventPalette(
+            border = Color(0xFFF9A825),
+            badgeBackground = Color(0xFFF9A825),
+            badgeText = Color(0xFF4E342E),
+            scoreColor = Color(0xFF6D4C41),
+            commentaryBackground = Color(0xFFFFF8E1),
+            commentaryBorder = Color(0xFFFFE082),
+            commentaryText = Color(0xFF5D4037)
+        )
+        "red-card" -> TickerEventPalette(
+            border = Color(0xFFC62828),
+            badgeBackground = Color(0xFFC62828),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF8E0000),
+            commentaryBackground = Color(0xFFFFEBEE),
+            commentaryBorder = Color(0xFFFFCDD2),
+            commentaryText = Color(0xFF8B0000)
+        )
+        "half-time" -> TickerEventPalette(
+            border = Color(0xFF546E7A),
+            badgeBackground = Color(0xFF546E7A),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF37474F),
+            commentaryBackground = Color(0xFFECEFF1),
+            commentaryBorder = Color(0xFFCFD8DC),
+            commentaryText = Color(0xFF37474F)
+        )
+        "full-time" -> TickerEventPalette(
+            border = Color(0xFF283593),
+            badgeBackground = Color(0xFF283593),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF1A237E),
+            commentaryBackground = Color(0xFFE8EAF6),
+            commentaryBorder = Color(0xFFC5CAE9),
+            commentaryText = Color(0xFF1A237E)
+        )
+        else -> TickerEventPalette(
+            border = Color(0xFF455A64),
+            badgeBackground = Color(0xFF455A64),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF263238),
+            commentaryBackground = Color(0xFFF1F5F7),
+            commentaryBorder = Color(0xFFD7E1E5),
+            commentaryText = Color(0xFF263238)
+        )
     }
 }
 
@@ -1042,13 +1264,18 @@ private fun LiveTickerNarrator(
 
                 val engine = ttsState.value
                 if (engine != null) {
-                    val languageResult = engine.setLanguage(Locale.UK)
+                    val selectedLocale = configureNarrationLocale(engine)
+                    configureNarrationVoice(engine, selectedLocale)
+                    engine.setSpeechRate(LIVE_NARRATION_RATE)
+                    engine.setPitch(LIVE_NARRATION_PITCH)
 
-                    if (
-                        languageResult == TextToSpeech.LANG_MISSING_DATA ||
-                        languageResult == TextToSpeech.LANG_NOT_SUPPORTED
-                    ) {
-                        engine.setLanguage(Locale.getDefault())
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        engine.setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
                     }
                 }
             }
@@ -1070,7 +1297,7 @@ private fun LiveTickerNarrator(
         }
 
         val nextItem = queue.firstOrNull() ?: return@LaunchedEffect
-        val text = nextItem.text.trim()
+        val text = stripInitialDotPlayerNames(nextItem.text.trim())
 
         if (text.isBlank()) {
             onConsume(nextItem.eventKey)
@@ -1091,6 +1318,88 @@ private fun LiveTickerNarrator(
 
         onConsume(nextItem.eventKey)
     }
+}
+
+private fun configureNarrationLocale(engine: TextToSpeech): Locale {
+    val fallbackLocales = listOf(Locale.UK, Locale.US, Locale.getDefault())
+
+    fallbackLocales.forEach { locale ->
+        val languageResult = engine.setLanguage(locale)
+
+        if (
+            languageResult != TextToSpeech.LANG_MISSING_DATA &&
+            languageResult != TextToSpeech.LANG_NOT_SUPPORTED
+        ) {
+            return locale
+        }
+    }
+
+    return Locale.getDefault()
+}
+
+private fun configureNarrationVoice(engine: TextToSpeech, locale: Locale) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        return
+    }
+
+    val selectedVoice = engine.voices
+        ?.asSequence()
+        ?.filter { voice ->
+            val voiceLocale = voice.locale ?: return@filter false
+            val sameLanguage = voiceLocale.language.equals(locale.language, ignoreCase = true)
+            val isNotInstalled =
+                voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+            sameLanguage && !isNotInstalled
+        }
+        ?.maxByOrNull { voice -> narrationVoiceScore(voice, locale) }
+
+    if (selectedVoice != null) {
+        engine.voice = selectedVoice
+    }
+}
+
+private fun narrationVoiceScore(voice: Voice, locale: Locale): Int {
+    var score = 0
+    val voiceLocale = voice.locale
+
+    if (voiceLocale != null && voiceLocale.language.equals(locale.language, ignoreCase = true)) {
+        score += 300
+    }
+
+    if (locale.country.isNotBlank() && voiceLocale?.country == locale.country) {
+        score += 60
+    }
+
+    if (voice.isNetworkConnectionRequired) {
+        score += if (PREFER_AI_TTS_VOICE) 85 else -8
+    } else {
+        score += if (PREFER_AI_TTS_VOICE) 6 else 20
+    }
+
+    score += voice.quality
+    score -= voice.latency / 3
+
+    val normalizedName = voice.name.lowercase(Locale.ROOT)
+    if (
+        normalizedName.contains("neural") ||
+        normalizedName.contains("neural2") ||
+        normalizedName.contains("journey") ||
+        normalizedName.contains("natural") ||
+        normalizedName.contains("wavenet") ||
+        normalizedName.contains("studio")
+    ) {
+        score += if (PREFER_AI_TTS_VOICE) 80 else 40
+    }
+
+    if (
+        normalizedName.contains("legacy") ||
+        normalizedName.contains("embedded") ||
+        normalizedName.contains("espeak")
+    ) {
+        score -= 30
+    }
+
+    return score
 }
 
 private fun buildAiStatusLine(aiStatus: LiveTickerAiStatus?): String {
@@ -1155,8 +1464,8 @@ private fun toTickerCompetitionCode(competitionName: String): String {
 }
 
 private fun toTickerEventSuffix(event: LiveTickerEvent): String {
-    val player = event.playerName?.takeIf { it.isNotBlank() }
-    val playerOut = event.playerOutName?.takeIf { it.isNotBlank() }
+    val player = toDisplaySurname(event.playerName).takeIf { it.isNotBlank() }
+    val playerOut = toDisplaySurname(event.playerOutName).takeIf { it.isNotBlank() }
 
     return when (event.eventType) {
         "goal" -> if (player != null) "GOAL $player" else "GOAL"
@@ -1196,7 +1505,7 @@ private fun TeamScorersList(
         } else {
             scorers.forEach { scorer ->
                 Text(
-                    text = "${scorer.player} ${scorer.minuteLabel}",
+                    text = "${toDisplaySurname(scorer.player)} ${scorer.minuteLabel}",
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = textAlign,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1379,7 +1688,7 @@ private fun SubstitutionPlayerRow(substitute: SubstitutionItem) {
             .padding(horizontal = 6.dp, vertical = 5.dp)
     ) {
         Text(
-            text = substitute.name,
+            text = toDisplaySurname(substitute.name),
             style = MaterialTheme.typography.bodySmall,
             color = textColor
         )
@@ -1471,7 +1780,7 @@ private fun formatStat(value: Int?, suffix: String = ""): String {
 private fun formatLineupPlayer(player: LineupPlayer): String {
     val positionSuffix = player.position?.let { " ($it)" }.orEmpty()
     val jerseyPrefix = player.jerseyNumber?.takeIf { it.isNotBlank() }?.let { "$it " }.orEmpty()
-    return "$jerseyPrefix${player.name}$positionSuffix"
+    return "$jerseyPrefix${toDisplaySurname(player.name)}$positionSuffix"
 }
 
 @Composable
@@ -1491,7 +1800,52 @@ private fun CompetitionTabBadge(
 }
 
 private fun formatScorers(scorers: List<GoalScorer>): String {
-    return scorers.joinToString(" • ") { "${it.player} ${it.minuteLabel}" }
+    return scorers.joinToString(" • ") { "${toDisplaySurname(it.player)} ${it.minuteLabel}" }
+}
+
+private fun stripInitialDotPlayerNames(value: String): String {
+    if (value.isBlank()) {
+        return value
+    }
+
+    return initialDotNameRegex.replace(value) { match ->
+        match.groupValues.getOrElse(1) { match.value }
+    }
+}
+
+private fun toDisplaySurname(value: String?): String {
+    val cleaned = value
+        ?.trim()
+        .orEmpty()
+        .replace(Regex("\\s+"), " ")
+
+    if (cleaned.isBlank()) {
+        return ""
+    }
+
+    val leadingInitialMatch = leadingInitialNameRegex.find(cleaned)
+    if (leadingInitialMatch != null) {
+        return leadingInitialMatch.groupValues.getOrElse(1) { cleaned }
+    }
+
+    val tokens = cleaned.split(" ").filter { it.isNotBlank() }.toMutableList()
+
+    while (tokens.size > 1 && initialTokenRegex.matches(tokens.first())) {
+        tokens.removeAt(0)
+    }
+
+    if (tokens.size <= 1) {
+        return tokens.firstOrNull() ?: cleaned
+    }
+
+    val last = tokens.last()
+    val previous = tokens[tokens.lastIndex - 1]
+
+    return if (surnameJoiners.contains(previous.lowercase(Locale.ROOT))) {
+        "$previous $last"
+    } else {
+        last
+    }
 }
 
 private fun formatStatusLabel(status: String?, kickoffUtc: String?): String {

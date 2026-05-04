@@ -40,6 +40,7 @@ export const config = {
   apiKey: process.env.SPORTS_API_KEY ?? "",
   apiTimezone: process.env.SPORTS_API_TIMEZONE ?? "Europe/London",
   syncIntervalMs: asNumber(process.env.SYNC_INTERVAL_MS, 20_000),
+  liveFeedSyncIntervalMs: asNumber(process.env.LIVE_FEED_SYNC_INTERVAL_MS, 10_000),
   aiCommentaryEnabled: asBoolean(process.env.AI_COMMENTARY_ENABLED, true),
   openAiApiKey: asString(process.env.OPENAI_API_KEY),
   openAiModel: asString(process.env.OPENAI_MODEL, "gpt-4o-mini"),
