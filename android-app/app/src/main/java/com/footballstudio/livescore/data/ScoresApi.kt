@@ -33,13 +33,17 @@ interface ScoresApi {
 }
 
 object ScoresApiFactory {
+    private const val NETWORK_TIMEOUT_SECONDS = 20L
+
     private val logging = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BASIC
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(NETWORK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(NETWORK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(NETWORK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(NETWORK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .addInterceptor(logging)
         .build()
 

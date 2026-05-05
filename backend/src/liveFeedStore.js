@@ -49,6 +49,25 @@ const currentDateIsoInApiTimezone = () => {
   return formatter.format(new Date());
 };
 
+const buildWelcomeFallback = ({ liveMatches, upcomingMatches }) => {
+  const safeLive = Array.isArray(liveMatches) ? liveMatches : [];
+  const safeUpcoming = Array.isArray(upcomingMatches) ? upcomingMatches : [];
+  const liveCount = safeLive.length;
+  const liveLine =
+    liveCount > 0
+      ? `There ${liveCount === 1 ? "is" : "are"} ${liveCount} live ${liveCount === 1 ? "match" : "matches"} in play at the moment.`
+      : "There are no live matches right now.";
+  const upcomingLine =
+    safeUpcoming.length > 0
+      ? `Coming up: ${safeUpcoming
+          .slice(0, 4)
+          .map((match) => `${String(match?.homeTeam ?? "Home")} versus ${String(match?.awayTeam ?? "Away")}`)
+          .join(", ")}.`
+      : "Coming up: no scheduled matches right now.";
+
+  return `Welcome to Football Studio live. ${liveLine} ${upcomingLine}`;
+};
+
 const toCompetitionKeySet = (competitionKey) => {
   if (competitionKey === null || competitionKey === undefined) {
     return null;
@@ -192,6 +211,26 @@ const buildDefaultSnapshot = (error = null) => {
   };
 };
 
+const withTimeout = async (promiseFactory, timeoutMs, fallbackValue) => {
+  let timeoutHandle;
+
+  try {
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(fallbackValue), timeoutMs);
+    });
+
+    return await Promise.race([promiseFactory(), timeoutPromise]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
+const triggerBackgroundLiveFeedRefresh = (competitionKey) => {
+  void refreshLiveFeedForCompetition(competitionKey);
+};
+
 const setSnapshot = (competitionKey, patch) => {
   const storageKey = toStorageCompetitionKey(competitionKey);
 
@@ -328,12 +367,18 @@ export const getLiveFeedSnapshot = async ({ competitionKey = null } = {}) => {
   const storageKey = toStorageCompetitionKey(competitionKey);
   let snapshot = liveFeedSnapshots.get(storageKey);
 
-  if (!snapshot || isSnapshotStale(snapshot)) {
-    await refreshLiveFeedForCompetition(competitionKey);
-    snapshot = liveFeedSnapshots.get(storageKey);
+  if (!snapshot) {
+    snapshot = buildDefaultSnapshot();
+    setSnapshot(competitionKey, snapshot);
+    triggerBackgroundLiveFeedRefresh(competitionKey);
+    return snapshot;
   }
 
-  return snapshot ?? buildDefaultSnapshot();
+  if (isSnapshotStale(snapshot)) {
+    triggerBackgroundLiveFeedRefresh(competitionKey);
+  }
+
+  return snapshot;
 };
 
 export const getLiveWelcomeCommentary = async ({ competitionKey = null } = {}) => {
@@ -353,11 +398,17 @@ export const getLiveWelcomeCommentary = async ({ competitionKey = null } = {}) =
   let todayMatches = cachedToday.hit ? cachedToday.matches : [];
 
   if (!cachedToday.hit) {
-    try {
-      todayMatches = await fetchMatchesForDate({ dateIso, competitionKey });
-    } catch {
-      todayMatches = [];
-    }
+    todayMatches = await withTimeout(
+      async () => {
+        try {
+          return await fetchMatchesForDate({ dateIso, competitionKey });
+        } catch {
+          return [];
+        }
+      },
+      2_500,
+      []
+    );
   }
 
   const upcomingMatches = todayMatches.filter((match) => {
@@ -367,12 +418,20 @@ export const getLiveWelcomeCommentary = async ({ competitionKey = null } = {}) =
 
   const totalGamesToday = todayMatches.length > 0 ? todayMatches.length : liveMatches.length;
 
-  const text = await generateLiveWelcomeCommentary({
-    totalGamesToday,
-    liveMatches,
-    upcomingMatches,
-    competitionKey
-  });
+  const text = await withTimeout(
+    () =>
+      generateLiveWelcomeCommentary({
+        totalGamesToday,
+        liveMatches,
+        upcomingMatches,
+        competitionKey
+      }),
+    3_000,
+    buildWelcomeFallback({
+      liveMatches,
+      upcomingMatches
+    })
+  );
 
   setWelcomeCommentaryCache(competitionKey, text);
 
