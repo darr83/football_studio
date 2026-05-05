@@ -1710,7 +1710,7 @@ private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
             Column(
                 modifier = Modifier.weight(1f),
@@ -1723,6 +1723,13 @@ private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center
+                )
+
+                LiveInlineTeamFacts(
+                    scorers = card.homeScorers,
+                    cards = card.homeCards,
+                    substitutions = card.homeSubs,
+                    textAlign = TextAlign.Start
                 )
             }
 
@@ -1752,6 +1759,13 @@ private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center
+                )
+
+                LiveInlineTeamFacts(
+                    scorers = card.awayScorers,
+                    cards = card.awayCards,
+                    substitutions = card.awaySubs,
+                    textAlign = TextAlign.End
                 )
             }
         }
@@ -1787,89 +1801,86 @@ private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            LivePresentationTeamFacts(
-                title = card.homeTeam,
-                scorers = card.homeScorers,
-                cards = card.homeCards,
-                substitutions = card.homeSubs,
-                modifier = Modifier.weight(1f)
-            )
-            LivePresentationTeamFacts(
-                title = card.awayTeam,
-                scorers = card.awayScorers,
-                cards = card.awayCards,
-                substitutions = card.awaySubs,
-                modifier = Modifier.weight(1f)
-            )
-        }
     }
 }
 
 @Composable
-private fun LivePresentationTeamFacts(
-    title: String,
+private fun LiveInlineTeamFacts(
     scorers: List<String>,
     cards: List<String>,
     substitutions: List<String>,
-    modifier: Modifier = Modifier
+    textAlign: TextAlign
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A3A8E)),
-        border = BorderStroke(1.dp, Color(0xFF3A57A4))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        if (scorers.isNotEmpty()) {
             Text(
-                text = title,
-                color = Color.White,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold
+                text = "Scorers",
+                color = Color(0xFFFFF59D),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth()
             )
 
-            LiveFactSection(label = "Scorers", items = scorers)
-            LiveFactSection(label = "Cards", items = cards)
-            LiveFactSection(label = "Subs", items = substitutions)
+            scorers.take(4).forEach { item ->
+                Text(
+                    text = "- $item",
+                    color = Color(0xFFE3EAFF),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = textAlign,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
-    }
-}
 
-@Composable
-private fun LiveFactSection(
-    label: String,
-    items: List<String>
-) {
-    Text(
-        text = label,
-        color = Color(0xFFFFF59D),
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold
-    )
-
-    if (items.isEmpty()) {
-        Text(
-            text = "-",
-            color = Color(0xFFE3EAFF),
-            style = MaterialTheme.typography.bodySmall
-        )
-    } else {
-        items.take(6).forEach { item ->
+        if (cards.isNotEmpty()) {
             Text(
-                text = item,
-                color = Color(0xFFE3EAFF),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1
+                text = "Cards",
+                color = Color(0xFFFFCCBC),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth()
             )
+
+            cards.take(4).forEach { item ->
+                Text(
+                    text = "- $item",
+                    color = Color(0xFFFFE0B2),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = textAlign,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        if (substitutions.isNotEmpty()) {
+            Text(
+                text = "Subs",
+                color = Color(0xFFB2DFDB),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            substitutions.take(3).forEach { item ->
+                Text(
+                    text = "- $item",
+                    color = Color(0xFFE3EAFF),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = textAlign,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

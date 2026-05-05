@@ -56,7 +56,7 @@ const API_HEADERS = {
   Authorization: `Token ${config.apiKey}`
 };
 
-const API_TIMEOUT_MS = 10_000;
+const API_TIMEOUT_MS = 20_000;
 const GOAL_INCIDENT_TYPES = new Set(["goal", "penalty_goal", "own_goal"]);
 const TEAM_BADGE_BASE_URL = "https://sports.bzzoiro.com/img/team";
 const VALID_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

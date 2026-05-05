@@ -412,6 +412,8 @@ class LiveScoreViewModel(
                     shouldRequestLiveWelcome = false
                 }
 
+                val previousLiveMatches = _uiState.value.liveTickerLiveMatches
+
                 val allLiveMatches = runCatching {
                     repository.fetchScores(
                         mode = "today-live",
@@ -419,7 +421,7 @@ class LiveScoreViewModel(
                         competitionKey = null
                     ).matches
                 }
-                    .getOrDefault(emptyList())
+                    .getOrElse { previousLiveMatches }
                     .filter { isLiveRoundupMatch(it) }
                     .sortedBy { it.kickoffUtc.orEmpty() }
 
