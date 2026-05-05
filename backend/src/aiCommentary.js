@@ -112,14 +112,6 @@ const normalizeCommentary = (value, fallback) => {
   return sliced;
 };
 
-const randomPick = (items) => {
-  if (!Array.isArray(items) || items.length === 0) {
-    return "";
-  }
-
-  return items[Math.floor(Math.random() * items.length)];
-};
-
 const formatMatchLabel = (match) => {
   const homeTeam = toSafeString(match?.homeTeam) || "Home";
   const awayTeam = toSafeString(match?.awayTeam) || "Away";
@@ -139,26 +131,20 @@ const formatMatchLabel = (match) => {
 };
 
 const fallbackWelcomeCommentary = ({
-  totalGamesToday,
   liveMatches,
   upcomingMatches
 }) => {
-  const intro = randomPick([
-    "Welcome to Football Studio Live.",
-    "Welcome to Football Studio live coverage.",
-    "You are now tuned in to Football Studio Live."
-  ]);
-  const todayLine = `Today there are ${totalGamesToday} games taking place.`;
+  const liveCount = Array.isArray(liveMatches) ? liveMatches.length : 0;
   const liveLine =
-    liveMatches.length > 0
-      ? `Live now: ${liveMatches.slice(0, 2).map(formatMatchLabel).join(" and ")}.`
+    liveCount > 0
+      ? `There ${liveCount === 1 ? "is" : "are"} ${liveCount} live ${liveCount === 1 ? "match" : "matches"} in play at the moment.`
       : "There are no live matches right now.";
   const upcomingLine =
-    upcomingMatches.length > 0
-      ? `Later today we have ${upcomingMatches.slice(0, 2).map(formatMatchLabel).join(" and ")}.`
-      : "We will bring you more fixtures as they begin.";
+    Array.isArray(upcomingMatches) && upcomingMatches.length > 0
+      ? `Coming up: ${upcomingMatches.slice(0, 4).map((match) => `${toSafeString(match?.homeTeam) || "Home"} versus ${toSafeString(match?.awayTeam) || "Away"}`).join(", ")}.`
+      : "Coming up: no scheduled matches right now.";
 
-  return `${intro} ${todayLine} ${liveLine} ${upcomingLine}`;
+  return `Welcome to Football Studio live. ${liveLine} ${upcomingLine}`;
 };
 
 const extractJsonPayload = (raw) => {
@@ -293,6 +279,7 @@ const generateAiWelcomeCommentary = async ({
   const promptPayload = {
     competitionKey,
     totalGamesToday,
+    liveCount: liveMatches.length,
     liveNow: liveMatches.slice(0, 3).map((match) => ({
       homeTeam: match.homeTeam,
       awayTeam: match.awayTeam,
@@ -306,9 +293,11 @@ const generateAiWelcomeCommentary = async ({
   };
 
   const systemPrompt =
-    "You are a live football commentator. Write one short, punchy welcome line for a live ticker. " +
-    "It must mention: Football Studio Live, total games today, live now summary, and later today summary. " +
-    "Use natural spoken English. Max 50 words. No markdown.";
+    "You are a live football commentator. Write a varied welcome message for a live ticker using these strict rules: " +
+    "Start exactly with 'Welcome to Football Studio live.' " +
+    "Then include exactly one live-status sentence: either 'There are X live matches in play at the moment.' or 'There are no live matches right now.' " +
+    "Then include a 'Coming up:' sentence listing up to 4 fixtures as 'Team versus Team'. " +
+    "Keep it to 2-3 short sentences, natural spoken English, no markdown.";
   const userPrompt =
     "Generate welcome commentary from this JSON:\n" +
     JSON.stringify(promptPayload);
@@ -342,11 +331,21 @@ const generateAiWelcomeCommentary = async ({
     response?.data?.choices?.[0]?.message?.content ??
     response?.data?.choices?.[0]?.text ??
     "";
+  const fallback = fallbackWelcomeCommentary({
+    liveMatches,
+    upcomingMatches
+  });
+  const normalized = normalizeCommentary(content, fallback);
+  const lowered = normalized.toLowerCase();
+  const liveCount = Array.isArray(liveMatches) ? liveMatches.length : 0;
+  const hasIntro = lowered.startsWith("welcome to football studio live.");
+  const hasLiveRule =
+    liveCount > 0
+      ? lowered.includes(`${liveCount} live`) && lowered.includes("in play at the moment")
+      : lowered.includes("there are no live matches right now");
+  const hasComingUp = lowered.includes("coming up:");
 
-  return normalizeCommentary(
-    content,
-    fallbackWelcomeCommentary({ totalGamesToday, liveMatches, upcomingMatches })
-  );
+  return hasIntro && hasLiveRule && hasComingUp ? normalized : fallback;
 };
 
 export const withAiCommentary = async (events) => {
@@ -368,15 +367,13 @@ export const withAiCommentary = async (events) => {
     (event) => typeof event?.eventKey === "string" && !commentaryCache.has(event.eventKey)
   );
 
-  const aiBatch = withoutCache.slice(0, MAX_NEW_EVENTS_PER_AI_CALL);
-
   setAiRuntimeState({
     enabled: config.aiCommentaryEnabled,
     hasApiKey: Boolean(config.openAiApiKey),
     model: config.openAiModel || null
   });
 
-  if (aiBatch.length > 0) {
+  if (withoutCache.length > 0) {
     let aiMap = new Map();
 
     if (!config.aiCommentaryEnabled) {
@@ -391,7 +388,15 @@ export const withAiCommentary = async (events) => {
       });
     } else {
       try {
-        aiMap = await generateAiCommentaryMap(aiBatch);
+        for (let index = 0; index < withoutCache.length; index += MAX_NEW_EVENTS_PER_AI_CALL) {
+          const batch = withoutCache.slice(index, index + MAX_NEW_EVENTS_PER_AI_CALL);
+          const batchMap = await generateAiCommentaryMap(batch);
+
+          for (const [eventKey, commentary] of batchMap.entries()) {
+            aiMap.set(eventKey, commentary);
+          }
+        }
+
         setAiRuntimeState({
           status: aiMap.size > 0 ? "active" : "fallback",
           error: aiMap.size > 0 ? null : "AI returned empty commentary; using fallback lines"
@@ -404,17 +409,12 @@ export const withAiCommentary = async (events) => {
       }
     }
 
-    for (const event of aiBatch) {
+    for (const event of withoutCache) {
       const fallback = fallbackCommentary(event);
       const aiText = aiMap.get(event.eventKey);
       const finalText = normalizeCommentary(aiText, fallback);
       commentaryCache.set(event.eventKey, finalText);
     }
-  }
-
-  for (const event of withoutCache.slice(MAX_NEW_EVENTS_PER_AI_CALL)) {
-    const fallback = fallbackCommentary(event);
-    commentaryCache.set(event.eventKey, fallback);
   }
 
   trimCache();
@@ -440,7 +440,6 @@ export const generateLiveWelcomeCommentary = async ({
   const safeLiveMatches = Array.isArray(liveMatches) ? liveMatches : [];
   const safeUpcomingMatches = Array.isArray(upcomingMatches) ? upcomingMatches : [];
   const fallback = fallbackWelcomeCommentary({
-    totalGamesToday: safeTotal,
     liveMatches: safeLiveMatches,
     upcomingMatches: safeUpcomingMatches
   });

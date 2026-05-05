@@ -2,7 +2,6 @@ package com.footballstudio.livescore
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.footballstudio.livescore.data.GoalScorer
 import com.footballstudio.livescore.data.LiveTickerEvent
 import com.footballstudio.livescore.data.LiveTickerAiStatus
 import com.footballstudio.livescore.data.MatchDetails
@@ -62,7 +61,6 @@ class LiveScoreViewModel(
     private val responseCache = mutableMapOf<String, ScoresResponse>()
     private val seenTickerEventKeys = LinkedHashSet<String>()
     private var liveTickerJob: Job? = null
-    private var isLiveTickerPrimed: Boolean = false
     private var shouldRequestLiveWelcome: Boolean = false
     private var shouldRequestLiveRoundupOnOpen: Boolean = false
     private var lastLiveRoundupRequestedAtMs: Long = 0L
@@ -159,7 +157,6 @@ class LiveScoreViewModel(
 
     fun openLiveTicker() {
         seenTickerEventKeys.clear()
-        isLiveTickerPrimed = false
         shouldRequestLiveWelcome = true
         shouldRequestLiveRoundupOnOpen = true
         lastLiveRoundupRequestedAtMs = 0L
@@ -187,7 +184,6 @@ class LiveScoreViewModel(
     fun closeLiveTicker() {
         liveTickerJob?.cancel()
         liveTickerJob = null
-        isLiveTickerPrimed = false
         shouldRequestLiveWelcome = false
         shouldRequestLiveRoundupOnOpen = false
         lastLiveRoundupRequestedAtMs = 0L
@@ -255,7 +251,6 @@ class LiveScoreViewModel(
 
         if (_uiState.value.isLiveTickerOpen) {
             seenTickerEventKeys.clear()
-            isLiveTickerPrimed = false
             shouldRequestLiveWelcome = false
             shouldRequestLiveRoundupOnOpen = false
 
@@ -430,26 +425,20 @@ class LiveScoreViewModel(
 
                 val newEvents = response.events.filter { seenTickerEventKeys.add(it.eventKey) }
                 val narrationItems =
-                    if (isLiveTickerPrimed) {
-                        newEvents
-                            .asReversed()
-                            .mapNotNull { event ->
-                                val text = event.commentary?.trim().orEmpty().ifBlank {
-                                    event.message
-                                }
-
-                                text.takeIf { it.isNotBlank() }?.let {
-                                    LiveNarrationItem(
-                                        eventKey = event.eventKey,
-                                        text = it
-                                    )
-                                }
+                    newEvents
+                        .asReversed()
+                        .mapNotNull { event ->
+                            val text = event.commentary?.trim().orEmpty().ifBlank {
+                                event.message
                             }
-                    } else {
-                        emptyList()
-                    }
 
-                isLiveTickerPrimed = true
+                            text.takeIf { it.isNotBlank() }?.let {
+                                LiveNarrationItem(
+                                    eventKey = event.eventKey,
+                                    text = it
+                                )
+                            }
+                        }
 
                 _uiState.update { current ->
                     val merged = (newEvents + current.liveTickerEvents)
@@ -610,80 +599,34 @@ class LiveScoreViewModel(
             .sortedBy { it.kickoffUtc.orEmpty() }
 
         if (liveMatches.isNotEmpty()) {
-            val liveLines = liveMatches.joinToString(" ") { match ->
+            return liveMatches.joinToString(" ") { match ->
                 val scoreLine = buildRoundupScoreline(match)
                 val minuteLine = match.minute?.let { "$it minutes" } ?: "minute unknown"
-                val scorersLine = buildScorersRoundupLine(match)
-                "$scoreLine, $minuteLine. $scorersLine"
+                "$scoreLine, $minuteLine."
             }
-
-            return "Roundup update. ${liveMatches.size} games are currently live. $liveLines"
         }
 
         if (!includeNoLiveFallback) {
             return ""
         }
 
-        val todayIso = today.selectedDate ?: currentDateIsoUtc()
-        val previousDateIso = shiftDateIso(todayIso, -1)
-        val yesterdayResults = repository.fetchScores(
-            mode = "date",
-            date = previousDateIso,
-            competitionKey = null
-        ).matches.sortedBy { it.kickoffUtc.orEmpty() }
         val upcomingToday = today.matches
             .filter { isUpcomingRoundupMatch(it) }
             .sortedBy { it.kickoffUtc.orEmpty() }
 
-        val resultsLine =
-            if (yesterdayResults.isEmpty()) {
-                "Yesterday there were no available results in tracked competitions."
-            } else {
-                val list = yesterdayResults.joinToString(" ") { match ->
-                    "${buildRoundupScoreline(match)}."
-                }
-
-                "Yesterday's results: $list"
-            }
-
         val upcomingLine =
             if (upcomingToday.isEmpty()) {
-                "There are no more scheduled games coming up today."
+                "Coming up: no scheduled matches right now."
             } else {
                 val list = upcomingToday.joinToString(" ") { match ->
                     val kickoffLabel = kickoffLabelFromIso(match.kickoffUtc)
                     "${match.homeTeam} versus ${match.awayTeam} at $kickoffLabel."
                 }
 
-                "Coming up today: $list"
+                "Coming up: $list"
             }
 
-        return "No games are currently live. $resultsLine $upcomingLine"
-    }
-
-    private fun buildScorersRoundupLine(match: ScoreMatch): String {
-        val homeScorers = formatScorerList(match.homeScorers)
-        val awayScorers = formatScorerList(match.awayScorers)
-
-        if (homeScorers.isBlank() && awayScorers.isBlank()) {
-            return "No listed scorers yet."
-        }
-
-        val homeLine = if (homeScorers.isBlank()) "none" else homeScorers
-        val awayLine = if (awayScorers.isBlank()) "none" else awayScorers
-
-        return "Scorers: ${match.homeTeam} $homeLine; ${match.awayTeam} $awayLine."
-    }
-
-    private fun formatScorerList(scorers: List<GoalScorer>): String {
-        if (scorers.isEmpty()) {
-            return ""
-        }
-
-        return scorers.joinToString(", ") { scorer ->
-            val minute = scorer.minuteLabel.trim()
-            if (minute.isBlank()) scorer.player else "${scorer.player} $minute"
-        }
+        return "There are no live matches right now. $upcomingLine"
     }
 
     private fun buildRoundupScoreline(match: ScoreMatch): String {
@@ -828,6 +771,6 @@ class LiveScoreViewModel(
         const val TODAY_RESULTS_CACHE_MS = 60_000L
         const val TOMORROW_FIXTURES_CACHE_MS = 60_000L
         const val MAX_TICKER_EVENTS = 120
-        const val MAX_TICKER_NARRATION_ITEMS = 30
+        const val MAX_TICKER_NARRATION_ITEMS = 120
     }
 }

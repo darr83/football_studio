@@ -1255,7 +1255,7 @@ private fun LiveTickerPresentationScreen(
     val cards = remember(events, liveMatches) {
         buildLivePresentationCards(events = events, liveMatches = liveMatches)
     }
-    var selectedCardIndex by remember(cards) { mutableStateOf(0) }
+    var selectedCardIndex by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -1278,6 +1278,24 @@ private fun LiveTickerPresentationScreen(
         while (true) {
             delay(7_500)
             selectedCardIndex = (selectedCardIndex + 1) % cards.size
+        }
+    }
+
+    LaunchedEffect(events, cards) {
+        if (cards.isEmpty() || events.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        val latestEvent = events.firstOrNull() ?: return@LaunchedEffect
+        val eventMatchKey = livePresentationMatchKey(
+            competitionName = latestEvent.competitionName,
+            homeTeam = latestEvent.homeTeam,
+            awayTeam = latestEvent.awayTeam
+        )
+        val eventCardIndex = cards.indexOfFirst { card -> card.key == eventMatchKey }
+
+        if (eventCardIndex >= 0) {
+            selectedCardIndex = eventCardIndex
         }
     }
 
@@ -1734,12 +1752,8 @@ private fun buildLivePresentationCards(
     val cards = linkedMapOf<String, LivePresentationMatchCard>()
     val liveKeys = linkedSetOf<String>()
 
-    fun keyOf(competitionName: String, homeTeam: String, awayTeam: String): String {
-        return "${competitionName.lowercase()}|${homeTeam.lowercase()}|${awayTeam.lowercase()}"
-    }
-
     liveMatches.forEach { match ->
-        val key = keyOf(match.leagueName, match.homeTeam, match.awayTeam)
+        val key = livePresentationMatchKey(match.leagueName, match.homeTeam, match.awayTeam)
         liveKeys += key
         cards[key] = LivePresentationMatchCard(
             key = key,
@@ -1761,7 +1775,7 @@ private fun buildLivePresentationCards(
     }
 
     events.forEach { event ->
-        val key = keyOf(event.competitionName, event.homeTeam, event.awayTeam)
+        val key = livePresentationMatchKey(event.competitionName, event.homeTeam, event.awayTeam)
         val existing = cards[key]
 
         if (existing == null || !liveKeys.contains(key)) {
@@ -1841,6 +1855,14 @@ private fun buildLivePresentationCards(
 
     return cards.values
         .sortedWith(compareBy<LivePresentationMatchCard> { it.competitionName.lowercase() }.thenBy { it.homeTeam.lowercase() })
+}
+
+private fun livePresentationMatchKey(
+    competitionName: String,
+    homeTeam: String,
+    awayTeam: String
+): String {
+    return "${competitionName.lowercase(Locale.ROOT)}|${homeTeam.lowercase(Locale.ROOT)}|${awayTeam.lowercase(Locale.ROOT)}"
 }
 
 private fun buildLiveBottomTickerText(
