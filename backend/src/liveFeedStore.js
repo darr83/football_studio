@@ -49,6 +49,33 @@ const currentDateIsoInApiTimezone = () => {
   return formatter.format(new Date());
 };
 
+const toCompetitionKeySet = (competitionKey) => {
+  if (competitionKey === null || competitionKey === undefined) {
+    return null;
+  }
+
+  const keys = String(competitionKey)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (keys.length === 0) {
+    return null;
+  }
+
+  return new Set(keys);
+};
+
+const filterMatchesByCompetition = (matches, competitionKey) => {
+  const competitionKeySet = toCompetitionKeySet(competitionKey);
+
+  if (competitionKeySet === null) {
+    return matches;
+  }
+
+  return matches.filter((match) => competitionKeySet.has(String(match?.competitionKey ?? "")));
+};
+
 const toStorageCompetitionKey = (competitionKey) => {
   const normalized =
     typeof competitionKey === "string" && competitionKey.trim().length > 0
@@ -63,11 +90,18 @@ const ensureCompetitionIsWatched = (competitionKey) => {
     return;
   }
 
-  const normalized = competitionKey.trim();
+  const requestedKeys = competitionKey
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 
-  if (normalized.length > 0) {
-    watchedCompetitionKeys.add(normalized);
+  if (requestedKeys.length === 0) {
+    return;
   }
+
+  requestedKeys.forEach((key) => {
+    watchedCompetitionKeys.add(key);
+  });
 };
 
 const toTickerStatusEntries = (matches) => {
@@ -140,9 +174,7 @@ const getCachedDateMatches = ({ dateIso, competitionKey }) => {
     };
   }
 
-  const matches = competitionKey
-    ? bucket.filter((match) => match.competitionKey === competitionKey)
-    : bucket;
+  const matches = filterMatchesByCompetition(bucket, competitionKey);
 
   return {
     hit: true,
@@ -314,9 +346,7 @@ export const getLiveWelcomeCommentary = async ({ competitionKey = null } = {}) =
   }
 
   const snapshot = getState();
-  const liveMatches = competitionKey
-    ? snapshot.matches.filter((match) => match.competitionKey === competitionKey)
-    : snapshot.matches;
+  const liveMatches = filterMatchesByCompetition(snapshot.matches, competitionKey);
   const dateIso = currentDateIsoInApiTimezone();
   const cachedToday = getCachedDateMatches({ dateIso, competitionKey });
 

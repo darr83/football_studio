@@ -48,6 +48,10 @@ const TARGET_COMPETITIONS = [
   }
 ];
 
+const KNOWN_COMPETITION_KEYS = new Set(
+  TARGET_COMPETITIONS.map((competition) => competition.key)
+);
+
 const API_HEADERS = {
   Authorization: `Token ${config.apiKey}`
 };
@@ -89,7 +93,24 @@ const resolveCompetitionKey = (event) => {
 };
 
 const isKnownCompetitionKey = (competitionKey) => {
-  return TARGET_COMPETITIONS.some((competition) => competition.key === competitionKey);
+  return KNOWN_COMPETITION_KEYS.has(competitionKey);
+};
+
+const parseCompetitionFilterKeys = (competitionKey) => {
+  if (competitionKey === null || competitionKey === undefined) {
+    return null;
+  }
+
+  const requested = String(competitionKey)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (requested.length === 0) {
+    return null;
+  }
+
+  return Array.from(new Set(requested)).filter((key) => isKnownCompetitionKey(key));
 };
 
 const isTargetLeague = (event) => {
@@ -97,15 +118,22 @@ const isTargetLeague = (event) => {
 };
 
 const withCompetitionFilter = (events, competitionKey) => {
-  if (!competitionKey) {
+  const filterKeys = parseCompetitionFilterKeys(competitionKey);
+
+  if (filterKeys === null) {
     return events;
   }
 
-  if (!isKnownCompetitionKey(competitionKey)) {
+  if (filterKeys.length === 0) {
     return [];
   }
 
-  return events.filter((event) => resolveCompetitionKey(event) === competitionKey);
+  const keySet = new Set(filterKeys);
+
+  return events.filter((event) => {
+    const resolvedKey = resolveCompetitionKey(event);
+    return resolvedKey !== null && keySet.has(resolvedKey);
+  });
 };
 
 const normalizeTeamName = (event, side) => {

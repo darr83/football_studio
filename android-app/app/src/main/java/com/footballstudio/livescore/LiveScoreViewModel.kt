@@ -65,9 +65,11 @@ class LiveScoreViewModel(
     private var shouldRequestLiveRoundupOnOpen: Boolean = false
     private var lastLiveRoundupRequestedAtMs: Long = 0L
     private var cachedTomorrowFixturesDateIso: String? = null
+    private var cachedTomorrowFixturesCompetitionKey: String? = null
     private var cachedTomorrowFixturesAtMs: Long = 0L
     private var cachedTomorrowFixtures: List<ScoreMatch> = emptyList()
     private var cachedTodayResultsDateIso: String? = null
+    private var cachedTodayResultsCompetitionKey: String? = null
     private var cachedTodayResultsAtMs: Long = 0L
     private var cachedTodayResults: List<ScoreMatch> = emptyList()
 
@@ -411,14 +413,14 @@ class LiveScoreViewModel(
 
                 val tomorrowFixtures =
                     if (allLiveMatches.isEmpty()) {
-                        loadTomorrowFixturesFallback()
+                        loadTomorrowFixturesFallback(currentCompetitionKey)
                     } else {
                         emptyList()
                     }
 
                 val todayResults =
                     if (allLiveMatches.isEmpty()) {
-                        loadTodayResultsFallback()
+                        loadTodayResultsFallback(currentCompetitionKey)
                     } else {
                         emptyList()
                     }
@@ -491,13 +493,14 @@ class LiveScoreViewModel(
             }
     }
 
-    private suspend fun loadTomorrowFixturesFallback(): List<ScoreMatch> {
+    private suspend fun loadTomorrowFixturesFallback(competitionKey: String?): List<ScoreMatch> {
         val todayIso = currentDateIsoUtc()
         val tomorrowIso = shiftDateIso(todayIso, 1)
         val nowMs = System.currentTimeMillis()
 
         if (
             cachedTomorrowFixturesDateIso == tomorrowIso &&
+                cachedTomorrowFixturesCompetitionKey == competitionKey &&
                 nowMs - cachedTomorrowFixturesAtMs <= TOMORROW_FIXTURES_CACHE_MS
         ) {
             return cachedTomorrowFixtures
@@ -507,7 +510,7 @@ class LiveScoreViewModel(
             repository.fetchScores(
                 mode = "date",
                 date = tomorrowIso,
-                competitionKey = null
+                competitionKey = competitionKey
             ).matches
         }
             .getOrDefault(emptyList())
@@ -515,18 +518,20 @@ class LiveScoreViewModel(
             .sortedWith(compareBy<ScoreMatch> { it.leagueName.lowercase() }.thenBy { it.kickoffUtc.orEmpty() })
 
         cachedTomorrowFixturesDateIso = tomorrowIso
+        cachedTomorrowFixturesCompetitionKey = competitionKey
         cachedTomorrowFixturesAtMs = nowMs
         cachedTomorrowFixtures = fixtures
 
         return fixtures
     }
 
-    private suspend fun loadTodayResultsFallback(): List<ScoreMatch> {
+    private suspend fun loadTodayResultsFallback(competitionKey: String?): List<ScoreMatch> {
         val todayIso = currentDateIsoUtc()
         val nowMs = System.currentTimeMillis()
 
         if (
             cachedTodayResultsDateIso == todayIso &&
+                cachedTodayResultsCompetitionKey == competitionKey &&
                 nowMs - cachedTodayResultsAtMs <= TODAY_RESULTS_CACHE_MS
         ) {
             return cachedTodayResults
@@ -536,7 +541,7 @@ class LiveScoreViewModel(
             repository.fetchScores(
                 mode = "date",
                 date = todayIso,
-                competitionKey = null
+                competitionKey = competitionKey
             ).matches
         }
             .getOrDefault(emptyList())
@@ -544,6 +549,7 @@ class LiveScoreViewModel(
             .sortedWith(compareBy<ScoreMatch> { it.leagueName.lowercase() }.thenBy { it.kickoffUtc.orEmpty() })
 
         cachedTodayResultsDateIso = todayIso
+        cachedTodayResultsCompetitionKey = competitionKey
         cachedTodayResultsAtMs = nowMs
         cachedTodayResults = results
 

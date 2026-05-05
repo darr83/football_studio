@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -111,7 +112,7 @@ import java.util.TimeZone
 private data class CompetitionTab(
     val title: String,
     val key: String,
-    val badgeUrl: String
+    val badgeUrl: String?
 )
 
 private data class TimelineTab(
@@ -137,8 +138,10 @@ private const val LIVE_NARRATION_PITCH = 1.0f
 private const val TTS_PREFS_NAME = "live_tts_settings"
 private const val TTS_PREF_PREFER_AI_VOICE = "prefer_ai_voice"
 private const val TTS_PREF_SELECTED_VOICE = "selected_voice"
+private const val TTS_PREF_SELECTED_COMPETITIONS = "selected_competitions"
 private const val TTS_PREF_PITCH = "pitch"
 private const val TTS_PREF_SPEED = "speed"
+private const val MINE_COMPETITION_KEY = "mine"
 private const val TTS_PITCH_MIN = 0.7f
 private const val TTS_PITCH_MAX = 1.4f
 private const val TTS_SPEED_MIN = 0.7f
@@ -191,6 +194,7 @@ private data class LivePresentationMatchCard(
 private data class TtsNarrationSettings(
     val preferAiVoice: Boolean = true,
     val selectedVoiceName: String? = null,
+    val selectedCompetitionKeys: Set<String> = emptySet(),
     val pitch: Float = LIVE_NARRATION_PITCH,
     val speed: Float = LIVE_NARRATION_RATE
 )
@@ -201,6 +205,11 @@ private data class TtsVoiceOption(
 )
 
 private val competitionTabs = listOf(
+    CompetitionTab(
+        title = "Mine",
+        key = MINE_COMPETITION_KEY,
+        badgeUrl = null
+    ),
     CompetitionTab(
         title = "Premier League",
         key = "premier-league",
@@ -257,6 +266,10 @@ private val competitionTabs = listOf(
         badgeUrl = "$LEAGUE_BADGE_BASE_URL/8/"
     )
 )
+
+private val selectableCompetitions = competitionTabs.filter { tab ->
+    tab.key != MINE_COMPETITION_KEY
+}
 
 private fun buildTimelineTabs(): List<TimelineTab> {
     val apiTimeZone = TimeZone.getTimeZone("Europe/London")
@@ -361,7 +374,8 @@ private fun LiveScoresScreen(
     val context = LocalContext.current
 
     val timelineTabs = buildTimelineTabs()
-    var selectedCompetitionIndex by rememberSaveable { mutableStateOf(0) }
+    val defaultCompetitionIndex = competitionTabs.indexOfFirst { it.key == "premier-league" }.coerceAtLeast(0)
+    var selectedCompetitionIndex by rememberSaveable { mutableStateOf(defaultCompetitionIndex) }
     val todayLiveDefaultIndex = timelineTabs.indexOfFirst { it.mode == "today-live" }.coerceAtLeast(0)
     var selectedTimelineIndex by rememberSaveable { mutableStateOf(todayLiveDefaultIndex) }
     var isTtsSettingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -370,9 +384,15 @@ private fun LiveScoresScreen(
     val selectedCompetition = competitionTabs[selectedCompetitionIndex]
     val selectedTimeline = timelineTabs[selectedTimelineIndex]
 
-    LaunchedEffect(selectedCompetitionIndex, selectedTimelineIndex) {
+    LaunchedEffect(selectedCompetitionIndex, selectedTimelineIndex, ttsSettings.selectedCompetitionKeys) {
+        val effectiveCompetitionKey = toEffectiveCompetitionFilter(
+            selectedCompetitionKey = selectedCompetition.key,
+            selectedTimelineMode = selectedTimeline.mode,
+            selectedCompetitionKeys = ttsSettings.selectedCompetitionKeys
+        )
+
         onFiltersChanged(
-            selectedCompetition.key,
+            effectiveCompetitionKey,
             selectedTimeline.mode,
             selectedTimeline.dateIso
         )
@@ -537,10 +557,62 @@ private fun TtsSettingsDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    text = "Voice Settings",
+                    text = "Settings",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Leagues In Mine",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Selected leagues will appear in Mine and Today/Live.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    selectableCompetitions.forEach { competition ->
+                        val isSelected = draft.selectedCompetitionKeys.contains(competition.key)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    val current = draft.selectedCompetitionKeys
+                                    val updated =
+                                        if (checked) {
+                                            current + competition.key
+                                        } else if (isSelected && current.size > 1) {
+                                            current - competition.key
+                                        } else {
+                                            current
+                                        }
+
+                                    draft = draft.copy(
+                                        selectedCompetitionKeys = sanitizeSelectedCompetitionKeys(updated)
+                                    )
+                                }
+                            )
+
+                            CompetitionTabBadge(
+                                badgeUrl = competition.badgeUrl,
+                                contentDescription = competition.title
+                            )
+
+                            Text(
+                                text = competition.title,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -643,6 +715,7 @@ private fun TtsSettingsDialog(
                         onClick = {
                             onSave(
                                 draft.copy(
+                                    selectedCompetitionKeys = sanitizeSelectedCompetitionKeys(draft.selectedCompetitionKeys),
                                     pitch = clampTtsPitch(draft.pitch),
                                     speed = clampTtsSpeed(draft.speed)
                                 )
@@ -713,10 +786,15 @@ private fun rememberAvailableNarrationVoices(): List<TtsVoiceOption> {
 
 private fun loadTtsNarrationSettings(context: Context): TtsNarrationSettings {
     val preferences = context.getSharedPreferences(TTS_PREFS_NAME, Context.MODE_PRIVATE)
+    val selectedCompetitionKeys =
+        preferences.getStringSet(TTS_PREF_SELECTED_COMPETITIONS, null)
+            ?.toSet()
+            .orEmpty()
 
     return TtsNarrationSettings(
         preferAiVoice = preferences.getBoolean(TTS_PREF_PREFER_AI_VOICE, true),
         selectedVoiceName = preferences.getString(TTS_PREF_SELECTED_VOICE, null)?.takeIf { it.isNotBlank() },
+        selectedCompetitionKeys = sanitizeSelectedCompetitionKeys(selectedCompetitionKeys),
         pitch = clampTtsPitch(preferences.getFloat(TTS_PREF_PITCH, LIVE_NARRATION_PITCH)),
         speed = clampTtsSpeed(preferences.getFloat(TTS_PREF_SPEED, LIVE_NARRATION_RATE))
     )
@@ -727,9 +805,38 @@ private fun saveTtsNarrationSettings(context: Context, settings: TtsNarrationSet
         .edit()
         .putBoolean(TTS_PREF_PREFER_AI_VOICE, settings.preferAiVoice)
         .putString(TTS_PREF_SELECTED_VOICE, settings.selectedVoiceName)
+        .putStringSet(
+            TTS_PREF_SELECTED_COMPETITIONS,
+            sanitizeSelectedCompetitionKeys(settings.selectedCompetitionKeys)
+        )
         .putFloat(TTS_PREF_PITCH, clampTtsPitch(settings.pitch))
         .putFloat(TTS_PREF_SPEED, clampTtsSpeed(settings.speed))
         .apply()
+}
+
+private fun sanitizeSelectedCompetitionKeys(keys: Set<String>): Set<String> {
+    val allowed = selectableCompetitions.map { it.key }.toSet()
+    val filtered = keys.filter { key -> allowed.contains(key) }.toSet()
+
+    if (filtered.isNotEmpty()) {
+        return filtered
+    }
+
+    return allowed
+}
+
+private fun toEffectiveCompetitionFilter(
+    selectedCompetitionKey: String,
+    selectedTimelineMode: String,
+    selectedCompetitionKeys: Set<String>
+): String {
+    if (selectedTimelineMode != "today-live" && selectedCompetitionKey != MINE_COMPETITION_KEY) {
+        return selectedCompetitionKey
+    }
+
+    return sanitizeSelectedCompetitionKeys(selectedCompetitionKeys)
+        .sorted()
+        .joinToString(",")
 }
 
 private fun clampTtsPitch(value: Float): Float {
@@ -2919,9 +3026,27 @@ private fun formatLineupPlayer(player: LineupPlayer): String {
 
 @Composable
 private fun CompetitionTabBadge(
-    badgeUrl: String,
+    badgeUrl: String?,
     contentDescription: String
 ) {
+    if (badgeUrl.isNullOrBlank()) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = contentDescription.take(1).uppercase(Locale.ROOT),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        return
+    }
+
     AsyncImage(
         model = badgeUrl,
         contentDescription = contentDescription,

@@ -98,6 +98,33 @@ const sortMatchesByKickoff = (matches) => {
   return [...matches].sort((a, b) => toTimestamp(a?.kickoffUtc) - toTimestamp(b?.kickoffUtc));
 };
 
+const toCompetitionKeySet = (competitionKey) => {
+  if (competitionKey === null || competitionKey === undefined) {
+    return null;
+  }
+
+  const keys = String(competitionKey)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (keys.length === 0) {
+    return null;
+  }
+
+  return new Set(keys);
+};
+
+const filterMatchesByCompetition = (matches, competitionKey) => {
+  const competitionKeySet = toCompetitionKeySet(competitionKey);
+
+  if (competitionKeySet === null) {
+    return matches;
+  }
+
+  return matches.filter((match) => competitionKeySet.has(String(match?.competitionKey ?? "")));
+};
+
 const getMatchIdentity = (match) => {
   if (match?.id !== null && match?.id !== undefined) {
     return `id:${match.id}`;
@@ -145,9 +172,7 @@ const getCachedDateMatches = ({ dateIso, competitionKey }) => {
     };
   }
 
-  const matches = competitionKey
-    ? bucket.filter((match) => match.competitionKey === competitionKey)
-    : bucket;
+  const matches = filterMatchesByCompetition(bucket, competitionKey);
 
   return {
     hit: true,
@@ -179,9 +204,7 @@ app.get("/api/scores", async (req, res) => {
   if (mode === "today-live") {
     const selectedDate = todayIso();
     const snapshot = getState();
-    const cachedLiveMatches = competitionKey
-      ? snapshot.matches.filter((match) => match.competitionKey === competitionKey)
-      : snapshot.matches;
+    const cachedLiveMatches = filterMatchesByCompetition(snapshot.matches, competitionKey);
     const cachedDate = getCachedDateMatches({ dateIso: selectedDate, competitionKey });
 
     try {
@@ -276,9 +299,7 @@ app.get("/api/scores", async (req, res) => {
   }
 
   const snapshot = getState();
-  const matches = competitionKey
-    ? snapshot.matches.filter((match) => match.competitionKey === competitionKey)
-    : snapshot.matches;
+  const matches = filterMatchesByCompetition(snapshot.matches, competitionKey);
 
   return res.json({
     ...snapshot,
