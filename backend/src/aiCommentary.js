@@ -60,6 +60,7 @@ const fallbackCommentary = (event) => {
     homeScore: event?.homeScore,
     awayScore: event?.awayScore
   });
+  const minuteLabel = toSafeString(event?.minuteLabel);
   const player = toSafeString(event?.playerName);
   const playerOut = toSafeString(event?.playerOutName);
 
@@ -82,6 +83,16 @@ const fallbackCommentary = (event) => {
         : player
           ? `Substitution: ${player} comes on.`
           : "Substitution made.";
+    case "injury-time":
+      return minuteLabel
+        ? `${scoreline}. Added time shown at ${minuteLabel}.`
+        : `${scoreline}. Added time has been indicated.`;
+    case "var-decision":
+      return toSafeString(event?.message)
+        ? `${toSafeString(event?.message).replace(/\.*$/, "")}.`
+        : player
+          ? `VAR decision involving ${player}.`
+          : "VAR decision confirmed by the officials.";
     case "half-time":
       return `Half-time: ${scoreline}.`;
     case "full-time":

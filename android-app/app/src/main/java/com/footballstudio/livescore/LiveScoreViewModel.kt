@@ -23,8 +23,19 @@ import java.util.TimeZone
 
 data class LiveNarrationItem(
     val eventKey: String,
-    val text: String
+    val text: String,
+    val role: LiveNarrationRole = LiveNarrationRole.MATCH_UPDATE,
+    val matchKey: String? = null,
+    val eventType: String? = null,
+    val venueName: String? = null,
+    val homeTeam: String? = null,
+    val awayTeam: String? = null
 )
+
+enum class LiveNarrationRole {
+    PRESENTER,
+    MATCH_UPDATE
+}
 
 data class LiveScoresUiState(
     val isLoading: Boolean = true,
@@ -387,7 +398,8 @@ class LiveScoreViewModel(
                                 listOf(
                                     LiveNarrationItem(
                                         eventKey = "welcome-${response.lastUpdatedUtc ?: System.currentTimeMillis()}",
-                                        text = welcomeText
+                                        text = welcomeText,
+                                        role = LiveNarrationRole.PRESENTER
                                     )
                                 )
                             }
@@ -426,6 +438,13 @@ class LiveScoreViewModel(
                     }
 
                 val newEvents = response.events.filter { seenTickerEventKeys.add(it.eventKey) }
+                val liveMatchesByKey = allLiveMatches.associateBy { match ->
+                    toLiveNarrationMatchKey(
+                        competitionName = match.leagueName,
+                        homeTeam = match.homeTeam,
+                        awayTeam = match.awayTeam
+                    )
+                }
                 val narrationItems =
                     newEvents
                         .asReversed()
@@ -433,11 +452,23 @@ class LiveScoreViewModel(
                             val text = event.commentary?.trim().orEmpty().ifBlank {
                                 event.message
                             }
+                            val matchKey = toLiveNarrationMatchKey(
+                                competitionName = event.competitionName,
+                                homeTeam = event.homeTeam,
+                                awayTeam = event.awayTeam
+                            )
+                            val matchContext = liveMatchesByKey[matchKey]
 
                             text.takeIf { it.isNotBlank() }?.let {
                                 LiveNarrationItem(
                                     eventKey = event.eventKey,
-                                    text = it
+                                    text = it,
+                                    role = LiveNarrationRole.MATCH_UPDATE,
+                                    matchKey = matchKey,
+                                    eventType = event.eventType,
+                                    venueName = matchContext?.venueName,
+                                    homeTeam = event.homeTeam,
+                                    awayTeam = event.awayTeam
                                 )
                             }
                         }
@@ -584,7 +615,8 @@ class LiveScoreViewModel(
                 current.pendingNarration +
                     LiveNarrationItem(
                         eventKey = "$eventPrefix-$nowMs",
-                        text = roundupText
+                        text = roundupText,
+                        role = LiveNarrationRole.PRESENTER
                     )
                 )
                 .distinctBy { it.eventKey }
@@ -697,6 +729,14 @@ class LiveScoreViewModel(
 
         val match = Regex("T(\\d{2}:\\d{2})").find(raw)
         return match?.groupValues?.getOrNull(1) ?: "time to be confirmed"
+    }
+
+    private fun toLiveNarrationMatchKey(
+        competitionName: String,
+        homeTeam: String,
+        awayTeam: String
+    ): String {
+        return "${competitionName.lowercase(Locale.ROOT)}|${homeTeam.lowercase(Locale.ROOT)}|${awayTeam.lowercase(Locale.ROOT)}"
     }
 
     private fun currentDateIsoUtc(): String {

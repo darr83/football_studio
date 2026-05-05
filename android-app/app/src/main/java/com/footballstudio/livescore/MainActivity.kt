@@ -129,6 +129,8 @@ private val redCardRowColor = Color(0xFFFFCDD2)
 private val redCardTextColor = Color(0xFF8B0000)
 private val liveMinuteBgColor = Color(0xFFC8E6C9)
 private val liveMinuteTextColor = Color(0xFF1B5E20)
+private val addedTimeBgColor = Color(0xFFFFF9C4)
+private val addedTimeTextColor = Color(0xFF5D4037)
 private val tickerPanelColor = Color(0xFFD8E7E7)
 private val tickerTextColor = Color(0xFF1E2A2A)
 private val tickerHighlightHome = Color(0xFF1B5E20)
@@ -188,7 +190,8 @@ private data class LivePresentationMatchCard(
     val homeCards: List<String>,
     val awayCards: List<String>,
     val homeSubs: List<String>,
-    val awaySubs: List<String>
+    val awaySubs: List<String>,
+    val matchMoments: List<String>
 )
 
 private data class TtsNarrationSettings(
@@ -374,7 +377,7 @@ private fun LiveScoresScreen(
     val context = LocalContext.current
 
     val timelineTabs = buildTimelineTabs()
-    val defaultCompetitionIndex = competitionTabs.indexOfFirst { it.key == "premier-league" }.coerceAtLeast(0)
+    val defaultCompetitionIndex = competitionTabs.indexOfFirst { it.key == MINE_COMPETITION_KEY }.coerceAtLeast(0)
     var selectedCompetitionIndex by rememberSaveable { mutableStateOf(defaultCompetitionIndex) }
     val todayLiveDefaultIndex = timelineTabs.indexOfFirst { it.mode == "today-live" }.coerceAtLeast(0)
     var selectedTimelineIndex by rememberSaveable { mutableStateOf(todayLiveDefaultIndex) }
@@ -383,11 +386,11 @@ private fun LiveScoresScreen(
 
     val selectedCompetition = competitionTabs[selectedCompetitionIndex]
     val selectedTimeline = timelineTabs[selectedTimelineIndex]
+    val hasLiveGames = state.matches.any { match -> isLiveMatchStatus(match.status) }
 
     LaunchedEffect(selectedCompetitionIndex, selectedTimelineIndex, ttsSettings.selectedCompetitionKeys) {
         val effectiveCompetitionKey = toEffectiveCompetitionFilter(
             selectedCompetitionKey = selectedCompetition.key,
-            selectedTimelineMode = selectedTimeline.mode,
             selectedCompetitionKeys = ttsSettings.selectedCompetitionKeys
         )
 
@@ -453,17 +456,17 @@ private fun LiveScoresScreen(
                             Box(
                                 modifier = Modifier
                                     .background(
-                                        color = if (state.isLiveTickerOpen) redCardRowColor else MaterialTheme.colorScheme.primary,
+                                        color = if (hasLiveGames) Color(0xFF1B5E20) else Color(0xFFC62828),
                                         shape = RoundedCornerShape(999.dp)
                                     )
                                     .clickable(onClick = onOpenLiveTicker)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     text = "LIVE",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (state.isLiveTickerOpen) redCardTextColor else MaterialTheme.colorScheme.onPrimary
+                                    color = Color.White
                                 )
                             }
                         }
@@ -827,10 +830,9 @@ private fun sanitizeSelectedCompetitionKeys(keys: Set<String>): Set<String> {
 
 private fun toEffectiveCompetitionFilter(
     selectedCompetitionKey: String,
-    selectedTimelineMode: String,
     selectedCompetitionKeys: Set<String>
 ): String {
-    if (selectedTimelineMode != "today-live" && selectedCompetitionKey != MINE_COMPETITION_KEY) {
+    if (selectedCompetitionKey != MINE_COMPETITION_KEY) {
         return selectedCompetitionKey
     }
 
@@ -957,6 +959,10 @@ private fun MatchCard(
     val canOpenDetails = isLive || isFinished
     val statusLabel = formatStatusLabel(match.status, match.kickoffUtc)
     val minuteLabel = match.minute?.let { "$it'" }
+    val addedTimeLabel =
+        match.addedTime
+            ?.takeIf { isLive && it > 0 }
+            ?.let { "+${it}'" }
 
     Card(
         modifier = Modifier.clickable(enabled = canOpenDetails) {
@@ -978,6 +984,7 @@ private fun MatchCard(
             MatchTimer(
                 statusLabel = statusLabel,
                 minuteLabel = minuteLabel,
+                addedTimeLabel = addedTimeLabel,
                 isLive = isLive
             )
 
@@ -1013,6 +1020,7 @@ private fun MatchCard(
 private fun MatchTimer(
     statusLabel: String,
     minuteLabel: String?,
+    addedTimeLabel: String?,
     isLive: Boolean
 ) {
     Column(
@@ -1044,6 +1052,25 @@ private fun MatchTimer(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (isLive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (!addedTimeLabel.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .background(
+                        color = addedTimeBgColor,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = "ADD $addedTimeLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = addedTimeTextColor
                 )
             }
         }
@@ -1729,6 +1756,37 @@ private fun LivePresentationMainMatchCard(card: LivePresentationMatchCard) {
             }
         }
 
+        if (card.matchMoments.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF143377)),
+                border = BorderStroke(1.dp, Color(0xFF3B58A9))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Match Updates",
+                        color = Color(0xFFFFF59D),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    card.matchMoments.take(3).forEach { moment ->
+                        Text(
+                            text = moment,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1869,7 +1927,7 @@ private fun buildLivePresentationCards(
             awayTeam = match.awayTeam,
             homeScore = match.homeScore,
             awayScore = match.awayScore,
-            minuteLabel = match.minute?.let { "$it'" },
+            minuteLabel = buildMinuteLabel(match.minute, match.addedTime),
             homeBadgeUrl = match.homeTeamBadgeUrl,
             awayBadgeUrl = match.awayTeamBadgeUrl,
             homeScorers = match.homeScorers.map { "${it.player} ${it.minuteLabel}".trim() },
@@ -1877,7 +1935,8 @@ private fun buildLivePresentationCards(
             homeCards = emptyList(),
             awayCards = emptyList(),
             homeSubs = emptyList(),
-            awaySubs = emptyList()
+            awaySubs = emptyList(),
+            matchMoments = emptyList()
         )
     }
 
@@ -1895,6 +1954,7 @@ private fun buildLivePresentationCards(
         val awayCards = existing.awayCards.toMutableList()
         val homeSubs = existing.homeSubs.toMutableList()
         val awaySubs = existing.awaySubs.toMutableList()
+        val matchMoments = existing.matchMoments.toMutableList()
 
         val minuteText = event.minuteLabel?.takeIf { it.isNotBlank() }?.let { " (${it.trim()})" }.orEmpty()
         val playerName = event.playerName?.takeIf { it.isNotBlank() }
@@ -1939,6 +1999,19 @@ private fun buildLivePresentationCards(
                     addUnique(homeSubs, subText)
                 }
             }
+            "injury-time" -> {
+                val injuryText =
+                    if (minuteText.isNotBlank()) {
+                        "Injury time$minuteText"
+                    } else {
+                        "Injury time"
+                    }
+                addUnique(matchMoments, injuryText)
+            }
+            "var-decision" -> {
+                val decisionText = playerName?.let { "VAR decision: $it$minuteText" } ?: "VAR decision$minuteText"
+                addUnique(matchMoments, decisionText)
+            }
         }
 
         cards[key] = LivePresentationMatchCard(
@@ -1956,7 +2029,8 @@ private fun buildLivePresentationCards(
             homeCards = homeCards,
             awayCards = awayCards,
             homeSubs = homeSubs,
-            awaySubs = awaySubs
+            awaySubs = awaySubs,
+            matchMoments = matchMoments
         )
     }
 
@@ -2357,6 +2431,8 @@ private fun toTickerEventLabel(event: LiveTickerEvent): String {
         "substitution" -> "SUB"
         "yellow-card" -> "YELLOW"
         "red-card" -> "RED"
+        "injury-time" -> "ADD TIME"
+        "var-decision" -> "VAR"
         "half-time" -> "HT"
         "full-time" -> "FT"
         else -> "EVENT"
@@ -2371,6 +2447,7 @@ private fun toTickerMinuteLabel(event: LiveTickerEvent): String {
     }
 
     return when (event.eventType) {
+        "injury-time" -> "ADD"
         "half-time" -> "HT"
         "full-time" -> "FT"
         else -> "--"
@@ -2424,6 +2501,24 @@ private fun tickerEventPalette(event: LiveTickerEvent): TickerEventPalette {
             commentaryBorder = Color(0xFFFFCDD2),
             commentaryText = Color(0xFF8B0000)
         )
+        "injury-time" -> TickerEventPalette(
+            border = Color(0xFF6A1B9A),
+            badgeBackground = Color(0xFF6A1B9A),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF4A148C),
+            commentaryBackground = Color(0xFFF3E5F5),
+            commentaryBorder = Color(0xFFCE93D8),
+            commentaryText = Color(0xFF4A148C)
+        )
+        "var-decision" -> TickerEventPalette(
+            border = Color(0xFF0277BD),
+            badgeBackground = Color(0xFF0277BD),
+            badgeText = Color.White,
+            scoreColor = Color(0xFF01579B),
+            commentaryBackground = Color(0xFFE1F5FE),
+            commentaryBorder = Color(0xFF81D4FA),
+            commentaryText = Color(0xFF01579B)
+        )
         "half-time" -> TickerEventPalette(
             border = Color(0xFF546E7A),
             badgeBackground = Color(0xFF546E7A),
@@ -2464,6 +2559,9 @@ private fun LiveTickerNarrator(
     val context = LocalContext.current
     var isReady by remember { mutableStateOf(false) }
     val ttsState = remember { mutableStateOf<TextToSpeech?>(null) }
+    val presenterVoiceNameState = remember { mutableStateOf<String?>(null) }
+    val candidateVoiceNamesState = remember { mutableStateOf<List<String>>(emptyList()) }
+    val gameVoiceAssignmentsState = remember { mutableStateOf(mutableMapOf<String, String>()) }
 
     DisposableEffect(context) {
         val tts = TextToSpeech(context) { status ->
@@ -2489,7 +2587,11 @@ private fun LiveTickerNarrator(
 
         val engine = ttsState.value ?: return@LaunchedEffect
         val selectedLocale = configureNarrationLocale(engine)
-        configureNarrationVoice(engine, selectedLocale, settings)
+        val candidateVoices = resolveNarrationCandidateVoices(engine, selectedLocale, settings)
+        val presenterVoice = configureNarrationVoice(engine, selectedLocale, settings)
+        presenterVoiceNameState.value = presenterVoice?.name
+        candidateVoiceNamesState.value = candidateVoices.map { voice -> voice.name }
+        gameVoiceAssignmentsState.value.clear()
         engine.setSpeechRate(clampTtsSpeed(settings.speed))
         engine.setPitch(clampTtsPitch(settings.pitch))
 
@@ -2521,12 +2623,51 @@ private fun LiveTickerNarrator(
             return@LaunchedEffect
         }
 
-        ttsState.value?.speak(
-            text,
-            TextToSpeech.QUEUE_ADD,
-            null,
-            "live-commentary-${nextItem.eventKey}"
-        )
+        val engine = ttsState.value ?: return@LaunchedEffect
+        val voicesByName =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                engine.voices?.associateBy { voice -> voice.name }.orEmpty()
+            } else {
+                emptyMap()
+            }
+        val presenterVoice =
+            presenterVoiceNameState.value
+                ?.let { voiceName -> voicesByName[voiceName] }
+
+        when (nextItem.role) {
+            LiveNarrationRole.PRESENTER -> {
+                speakNarrationLine(
+                    engine = engine,
+                    voice = presenterVoice,
+                    text = text,
+                    utteranceId = "presenter-${nextItem.eventKey}"
+                )
+            }
+
+            LiveNarrationRole.MATCH_UPDATE -> {
+                val presenterLeadIn = buildPresenterLeadIn(nextItem)
+                val matchVoice = resolveMatchVoice(
+                    item = nextItem,
+                    voicesByName = voicesByName,
+                    presenterVoiceName = presenterVoiceNameState.value,
+                    candidateVoiceNames = candidateVoiceNamesState.value,
+                    gameVoiceAssignments = gameVoiceAssignmentsState.value
+                )
+
+                speakNarrationLine(
+                    engine = engine,
+                    voice = presenterVoice,
+                    text = stripInitialDotPlayerNames(presenterLeadIn),
+                    utteranceId = "presenter-lead-${nextItem.eventKey}"
+                )
+                speakNarrationLine(
+                    engine = engine,
+                    voice = matchVoice,
+                    text = text,
+                    utteranceId = "match-${nextItem.eventKey}"
+                )
+            }
+        }
 
         onConsume(nextItem.eventKey)
     }
@@ -2553,22 +2694,12 @@ private fun configureNarrationVoice(
     engine: TextToSpeech,
     locale: Locale,
     settings: TtsNarrationSettings
-) {
+): Voice? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-        return
+        return null
     }
 
-    val candidateVoices = engine.voices
-        ?.asSequence()
-        ?.filter { voice ->
-            val voiceLocale = voice.locale ?: return@filter false
-            val sameLanguage = voiceLocale.language.equals(locale.language, ignoreCase = true)
-            val isNotInstalled =
-                voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
-            sameLanguage && !isNotInstalled
-        }
-        ?.toList()
-        .orEmpty()
+    val candidateVoices = resolveNarrationCandidateVoices(engine, locale, settings)
 
     val selectedByName = settings.selectedVoiceName
         ?.takeIf { it.isNotBlank() }
@@ -2588,6 +2719,120 @@ private fun configureNarrationVoice(
     if (selectedVoice != null) {
         engine.voice = selectedVoice
     }
+
+    return selectedVoice
+}
+
+private fun resolveNarrationCandidateVoices(
+    engine: TextToSpeech,
+    locale: Locale,
+    settings: TtsNarrationSettings
+): List<Voice> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        return emptyList()
+    }
+
+    return engine.voices
+        ?.asSequence()
+        ?.filter { voice ->
+            val voiceLocale = voice.locale ?: return@filter false
+            val sameLanguage = voiceLocale.language.equals(locale.language, ignoreCase = true)
+            val isNotInstalled =
+                voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+            sameLanguage && !isNotInstalled
+        }
+        ?.sortedByDescending { voice ->
+            narrationVoiceScore(
+                voice = voice,
+                locale = locale,
+                preferAiVoice = settings.preferAiVoice
+            )
+        }
+        ?.toList()
+        .orEmpty()
+}
+
+private fun speakNarrationLine(
+    engine: TextToSpeech,
+    voice: Voice?,
+    text: String,
+    utteranceId: String
+) {
+    val cleanText = text.trim()
+
+    if (cleanText.isBlank()) {
+        return
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && voice != null) {
+        engine.voice = voice
+    }
+
+    engine.speak(
+        cleanText,
+        TextToSpeech.QUEUE_ADD,
+        null,
+        utteranceId
+    )
+}
+
+private fun resolveMatchVoice(
+    item: LiveNarrationItem,
+    voicesByName: Map<String, Voice>,
+    presenterVoiceName: String?,
+    candidateVoiceNames: List<String>,
+    gameVoiceAssignments: MutableMap<String, String>
+): Voice? {
+    val matchKey = item.matchKey?.trim().orEmpty()
+
+    if (matchKey.isBlank()) {
+        return presenterVoiceName?.let { voiceName -> voicesByName[voiceName] }
+    }
+
+    val existing = gameVoiceAssignments[matchKey]
+    if (!existing.isNullOrBlank()) {
+        return voicesByName[existing]
+            ?: presenterVoiceName?.let { voiceName -> voicesByName[voiceName] }
+    }
+
+    val nonPresenterVoices = candidateVoiceNames.filter { voiceName ->
+        voiceName != presenterVoiceName
+    }
+    val selectedVoiceName =
+        if (nonPresenterVoices.isNotEmpty()) {
+            val index = (matchKey.hashCode() and Int.MAX_VALUE) % nonPresenterVoices.size
+            nonPresenterVoices[index]
+        } else {
+            presenterVoiceName
+        }
+
+    if (!selectedVoiceName.isNullOrBlank()) {
+        gameVoiceAssignments[matchKey] = selectedVoiceName
+    }
+
+    return selectedVoiceName?.let { voiceName -> voicesByName[voiceName] }
+}
+
+private fun buildPresenterLeadIn(item: LiveNarrationItem): String {
+    val location = item.venueName
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: item.homeTeam
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        ?: "the match"
+
+    val headline = when (item.eventType?.lowercase(Locale.ROOT)) {
+        "goal", "penalty" -> "There is a goal"
+        "red-card" -> "There is a red card"
+        "yellow-card" -> "There is a yellow card"
+        "substitution" -> "There is a substitution"
+        "injury-time" -> "There is added time"
+        "var-decision" -> "There is a VAR decision"
+        else -> "There is an update"
+    }
+
+    return "$headline at $location. Let's go live and see what's happened."
 }
 
 private fun narrationVoiceScore(
@@ -2661,6 +2906,8 @@ private fun toTickerStatusLabel(event: LiveTickerEvent): String {
         "substitution" -> "SUB"
         "yellow-card" -> "YC"
         "red-card" -> "RC"
+        "injury-time" -> "ADD"
+        "var-decision" -> "VAR"
         "half-time" -> "HT"
         "full-time" -> "FT"
         else -> "EVT"
@@ -2718,6 +2965,10 @@ private fun toTickerEventSuffix(event: LiveTickerEvent): String {
         }
         "yellow-card" -> if (player != null) "YELLOW CARD $player" else "YELLOW CARD"
         "red-card" -> if (player != null) "RED CARD $player" else "RED CARD"
+        "injury-time" -> event.minuteLabel?.takeIf { it.isNotBlank() }
+            ?.let { "INJURY TIME $it" }
+            ?: "INJURY TIME"
+        "var-decision" -> if (player != null) "VAR DECISION $player" else "VAR DECISION"
         "half-time" -> "HALF TIME"
         "full-time" -> "FULL TIME"
         else -> event.message
@@ -3060,6 +3311,19 @@ private fun CompetitionTabBadge(
 
 private fun formatScorers(scorers: List<GoalScorer>): String {
     return scorers.joinToString(" • ") { "${toDisplaySurname(it.player)} ${it.minuteLabel}" }
+}
+
+private fun buildMinuteLabel(minute: Int?, addedTime: Int?): String? {
+    if (minute == null) {
+        return null
+    }
+
+    val added = addedTime?.takeIf { it > 0 }
+    return if (added != null) {
+        "${minute}+${added}'"
+    } else {
+        "${minute}'"
+    }
 }
 
 private fun stripInitialDotPlayerNames(value: String): String {

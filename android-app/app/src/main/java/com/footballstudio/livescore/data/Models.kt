@@ -21,6 +21,7 @@ data class ScoreMatch(
     val venueName: String?,
     val status: String?,
     val minute: Int?,
+    val addedTime: Int? = null,
     val homeTeamId: Int?,
     val awayTeamId: Int?,
     val homeTeamBadgeUrl: String?,

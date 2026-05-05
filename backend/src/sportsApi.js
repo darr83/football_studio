@@ -180,6 +180,20 @@ const toMinuteSort = (incident) => {
   return minute * 100 + addedTime;
 };
 
+const normalizeIncidentType = (value) => {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+};
+
+const toUpperLabel = (value) => {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+};
+
 const toCoachName = (value) => {
   if (!value) {
     return null;
@@ -378,6 +392,11 @@ const normalizeMatch = (event) => {
   const homeTeamId = normalizeTeamId(event, "home");
   const awayTeamId = normalizeTeamId(event, "away");
   const competitionKey = resolveCompetitionKey(event);
+  const addedTimeRaw = toNumber(event?.added_time ?? event?.injury_time);
+  const addedTime =
+    addedTimeRaw !== null && addedTimeRaw > 0
+      ? Math.round(addedTimeRaw)
+      : null;
   const venueName =
     event?.venue?.name ??
     event?.venue_name ??
@@ -392,6 +411,7 @@ const normalizeMatch = (event) => {
     venueName,
     status: event?.status ?? "UNKNOWN",
     minute: event?.current_minute ?? null,
+    addedTime,
     homeTeamId,
     awayTeamId,
     homeTeamBadgeUrl: toTeamBadgeUrl(homeTeamId),
@@ -472,7 +492,8 @@ const toTickerMessage = ({
 };
 
 const normalizeTickerIncident = (event, incident) => {
-  const incidentType = String(incident?.type ?? "").toLowerCase();
+  const incidentTypeRaw = String(incident?.type ?? "").toLowerCase();
+  const incidentType = normalizeIncidentType(incident?.type);
   const leagueName = String(event?.league?.name ?? event?.group_name ?? "Unknown League");
   const homeTeam = normalizeTeamName(event, "home");
   const awayTeam = normalizeTeamName(event, "away");
@@ -483,22 +504,24 @@ const normalizeTickerIncident = (event, incident) => {
   const teamSide =
     incident?.is_home === true ? "home" : incident?.is_home === false ? "away" : null;
 
-  if (incidentType === "goal") {
+  if (incidentType === "goal" || incidentType === "penaltygoal" || incidentType === "owngoal") {
     const goalType = String(incident?.goal_type ?? "regular").toLowerCase();
-    const eventLabel = goalType === "penalty" ? "PENALTY GOAL" : "GOAL";
+    const isPenaltyGoal = incidentType === "penaltygoal" || goalType === "penalty";
+    const isOwnGoal = incidentType === "owngoal" || goalType === "own_goal";
+    const eventLabel = isPenaltyGoal ? "PENALTY GOAL" : isOwnGoal ? "OWN GOAL" : "GOAL";
 
     return {
       eventKey: [
         "live",
         String(event?.id ?? "na"),
-        incidentType,
+        incidentTypeRaw,
         minuteLabel,
         String(playerName ?? ""),
         goalType,
         String(homeScore ?? ""),
         String(awayScore ?? "")
       ].join(":"),
-      eventType: goalType === "penalty" ? "penalty" : "goal",
+      eventType: isPenaltyGoal ? "penalty" : "goal",
       teamSide,
       competitionName: leagueName,
       homeTeam,
@@ -631,6 +654,84 @@ const normalizeTickerIncident = (event, incident) => {
         awayScore,
         eventLabel: "SUBSTITUTION",
         playerName: substitutionDetail
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
+  if (incidentType === "injurytime") {
+    const periodText = toUpperLabel(incident?.text);
+    const addedMinutes = toNumber(incident?.injury_time ?? incident?.added_time);
+    const addedText =
+      addedMinutes !== null && addedMinutes > 0 ? `${addedMinutes} ADDED MINUTES` : null;
+    const eventLabel =
+      periodText || addedText
+        ? `INJURY TIME ${periodText || addedText}`.trim()
+        : "INJURY TIME";
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentTypeRaw,
+        minuteLabel,
+        String(periodText || addedText || "")
+      ].join(":"),
+      eventType: "injury-time",
+      teamSide: null,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel,
+      playerName: null,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel
+      }),
+      sortValue: toTickerMinuteSort(incident)
+    };
+  }
+
+  if (incidentType === "vardecision") {
+    const decisionText =
+      toUpperLabel(incident?.decision) ||
+      toUpperLabel(incident?.var_decision) ||
+      toUpperLabel(incident?.text);
+    const eventLabel =
+      decisionText.length > 0 ? `VAR DECISION ${decisionText}` : "VAR DECISION";
+
+    return {
+      eventKey: [
+        "live",
+        String(event?.id ?? "na"),
+        incidentTypeRaw,
+        minuteLabel,
+        String(playerName ?? ""),
+        decisionText
+      ].join(":"),
+      eventType: "var-decision",
+      teamSide,
+      competitionName: leagueName,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      minuteLabel,
+      playerName,
+      message: toTickerMessage({
+        leagueName,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        eventLabel,
+        playerName
       }),
       sortValue: toTickerMinuteSort(incident)
     };
