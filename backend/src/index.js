@@ -389,13 +389,27 @@ app.get("/api/scores/stream", (req, res) => {
   });
 });
 
-const start = async () => {
-  await startScheduler();
-  await startLiveFeedScheduler();
+const startBackgroundSchedulers = async () => {
+  try {
+    await startScheduler();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    console.error(`Core scheduler failed to start: ${message}`);
+  }
 
+  try {
+    await startLiveFeedScheduler();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    console.error(`Live feed scheduler failed to start: ${message}`);
+  }
+};
+
+const start = () => {
   app.listen(config.port, () => {
     console.log(`Live score backend listening on http://localhost:${config.port}`);
+    void startBackgroundSchedulers();
   });
 };
 
-void start();
+start();
